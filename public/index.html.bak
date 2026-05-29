@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Client Follow-up Tracker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f3;color:#1a1a1a;min-height:100vh}
+.wrap{max-width:860px;margin:0 auto;padding:2rem 1rem}
+h1{font-size:22px;font-weight:600}
+.sub{font-size:13px;color:#888;margin-top:2px}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem;gap:12px;flex-wrap:wrap}
+.hdr-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sync-info{font-size:12px;color:#888;text-align:right;line-height:1.4}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.5rem}
+.stat{background:#fff;border-radius:12px;padding:.9rem;cursor:pointer;border:1.5px solid transparent}
+.stat:hover{border-color:#ddd}
+.stat.on{border-color:#1a1a1a}
+.stat-lbl{font-size:11px;color:#888;margin-bottom:5px;font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.stat-n{font-size:26px;font-weight:600}
+
+.filters{display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap;align-items:center}
+.srch{position:relative;flex:1;min-width:200px}
+.srch svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4}
+.srch input{padding-left:34px;width:100%}
+input,select,textarea{font-family:inherit;font-size:14px;padding:9px 11px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#1a1a1a;outline:none;width:100%}
+input:focus,select:focus,textarea:focus{border-color:#1a1a1a}
+textarea{resize:vertical;min-height:80px}
+
+.fb{font-size:13px;padding:6px 14px;border-radius:999px;border:1px solid #ddd;background:#fff;color:#888;cursor:pointer;white-space:nowrap}
+.fb:hover{border-color:#aaa;color:#444}
+.fb.on{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+
+.pri{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;background:#1a1a1a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;font-family:inherit}
+.pri:hover{opacity:.85}
+.pri:disabled{opacity:.4;cursor:not-allowed}
+.sec{display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:#fff;color:#444;border:1px solid #ddd;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit}
+.sec:hover{border-color:#aaa}
+.back{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:#888;background:none;border:none;cursor:pointer;padding:0;margin-bottom:1.5rem;font-family:inherit}
+.back:hover{color:#333}
+
+.cards{display:flex;flex-direction:column;gap:8px}
+.card{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:1rem 1.25rem;cursor:pointer;transition:border-color .15s}
+.card:hover{border-color:#aaa}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.card-name{font-weight:600;font-size:15px;margin-bottom:3px}
+.card-meta{font-size:12px;color:#888;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.card-right{text-align:right;flex-shrink:0}
+.card-days{font-size:12px;color:#888;margin-top:4px}
+.card-action{margin-top:10px;padding-top:10px;border-top:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.action-tag{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:4px 10px;border-radius:6px}
+.tag-felicity{background:#ede9fe;color:#5b21b6}
+.tag-annie{background:#fce7f3;color:#9d174d}
+
+.badge{display:inline-block;font-size:12px;font-weight:600;padding:4px 10px;border-radius:6px;white-space:nowrap}
+.b-active{background:#e6f4ea;color:#2d7a3a}
+.b-checkin{background:#fff3e0;color:#b85e00}
+.b-discharge{background:#fce8e8;color:#b32020}
+.b-rebook{background:#ede9fe;color:#5b21b6}
+
+.det-box{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:1.25rem;margin-bottom:1rem}
+.mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.mini{background:#f7f7f5;border-radius:8px;padding:10px 12px}
+.mini p:first-child{font-size:11px;color:#888;margin-bottom:3px;font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.mini p:last-child{font-size:13px;font-weight:600}
+.prog{height:6px;background:#eee;border-radius:3px;overflow:hidden;margin-top:8px}
+.prog-fill{height:100%;border-radius:3px}
+.prog-row{display:flex;justify-content:space-between;margin-bottom:6px}
+.prog-row span{font-size:12px;color:#888}
+
+.action-box{background:#fff;border:1px solid #e8e8e8;border-radius:12px;padding:1.25rem;margin-bottom:1rem}
+.action-box h3{font-size:14px;font-weight:600;margin-bottom:12px}
+.assignee-btns{display:flex;gap:8px;margin-bottom:12px}
+.assignee-btn{flex:1;padding:10px;border:1.5px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;font-family:inherit;font-weight:500;transition:all .15s}
+.assignee-btn:hover{border-color:#aaa}
+.assignee-btn.sel-felicity{border-color:#5b21b6;background:#ede9fe;color:#5b21b6}
+.assignee-btn.sel-annie{border-color:#9d174d;background:#fce7f3;color:#9d174d}
+
+.ch-item{background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start;margin-bottom:8px}
+.ch-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;background:#e3f0ff}
+.ch-name{font-size:14px;font-weight:600}
+.ch-service{font-size:12px;color:#888;margin-top:2px}
+.ch-date{font-size:12px;color:#888;white-space:nowrap}
+.latest-tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:#1a1a1a;color:#fff;margin-left:6px;vertical-align:1px}
+
+.empty{padding:3rem;text-align:center;color:#888;font-size:14px;line-height:1.8}
+.dashed{border:1.5px dashed #ddd;border-radius:12px}
+.error-box{background:#fce8e8;border:1px solid #f5c6c6;border-radius:10px;padding:1rem 1.25rem;font-size:14px;color:#b32020;margin-bottom:1rem}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+h3.section{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#888;margin-bottom:.75rem}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="empty">Loading...</div></div>
+<script>
+let allClients=[];
+let syncedAt=null;
+let syncing=false;
+let error=null;
+let view='list';
+let selId=null;
+let filt='all';
+let q='';
+let assignee='';
+let actionNote='';
+
+function addBiz(s,n){
+  const d=new Date(s+'T00:00:00');let a=0;
+  while(a<n){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)a++;}
+  return d.toISOString().split('T')[0];
+}
+function bizLeft(e){
+  if(!e)return 10;
+  const now=new Date();now.setHours(0,0,0,0);
+  const end=new Date(e+'T00:00:00');
+  if(now>end)return -1;
+  let n=0,d=new Date(now);
+  while(d<end){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)n++;}
+  return n;
+}
+function fmt(s){
+  if(!s)return '—';
+  return new Date(s+'T00:00:00').toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+}
+function timeSince(iso){
+  const mins=Math.round((Date.now()-new Date(iso))/60000);
+  if(mins<1)return 'just now';
+  if(mins<60)return `${mins} min ago`;
+  return `${Math.round(mins/60)} hr ago`;
+}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function getStatus(c){
+  const appts=c.appointments||[];
+  if(!appts.length)return 'rebook';
+  const lastDate=appts[0].date;
+  const supportEnd=addBiz(lastDate,10);
+  const left=bizLeft(supportEnd);
+  if(left<0)return 'discharge';
+  if(left<=3)return 'checkin';
+  return 'active';
+}
+function getSupportEnd(c){
+  const appts=c.appointments||[];
+  if(!appts.length)return null;
+  return addBiz(appts[0].date,10);
+}
+
+const SL={active:'Active',checkin:'Check-in needed',discharge:'Discharge',rebook:'Rebook needed'};
+const SBC={active:'b-active',checkin:'b-checkin',discharge:'b-discharge',rebook:'b-rebook'};
+const SC={active:'#2d7a3a',checkin:'#b85e00',discharge:'#b32020',rebook:'#5b21b6'};
+
+function enrich(raw){
+  return raw.map(c=>({...c,status:getStatus(c),supportEnd:getSupportEnd(c)}));
+}
+
+async function sync(){
+  syncing=true;error=null;render();
+  try{
+    const res=await fetch('/api/clients');
+    const body=await res.json();
+    if(!res.ok)throw new Error(body.error||'Server error');
+    allClients=enrich(body.clients||[]);
+    syncedAt=body.syncedAt;
+  }catch(e){error=e.message;}
+  syncing=false;render();
+}
+
+async function saveAction(clientId){
+  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId,assignee,note:actionNote})});
+  // Update local state
+  allClients=allClients.map(c=>c.id===clientId?{...c,action:assignee?{assignee,note:actionNote}:null}:c);
+  assignee='';actionNote='';
+  view='detail';render();
+}
+
+function counts(){
+  return{
+    active:allClients.filter(c=>c.status==='active').length,
+    checkin:allClients.filter(c=>c.status==='checkin').length,
+    discharge:allClients.filter(c=>c.status==='discharge').length,
+    rebook:allClients.filter(c=>c.status==='rebook').length,
+  };
+}
+function getList(){
+  const order={checkin:0,discharge:1,rebook:2,active:3};
+  return allClients
+    .filter(c=>{
+      if(filt!=='all'&&c.status!==filt)return false;
+      if(q&&!c.name.toLowerCase().includes(q.toLowerCase())&&!(c.practitioner||'').toLowerCase().includes(q.toLowerCase()))return false;
+      return true;
+    })
+    .sort((a,b)=>order[a.status]-order[b.status]);
+}
+
+function renderList(){
+  const cnt=counts();const list=getList();
+  const syncBtn=`<button class="pri" onclick="sync()" ${syncing?'disabled':''}>${syncing?'<span class="spin"></span> Syncing…':'↻ Sync from Splose'}</button>`;
+  return`
+  <div class="hdr">
+    <div><h1>Follow-up tracker</h1><p class="sub">${allClients.length} clients · Apr–May 2026</p></div>
+    <div class="hdr-right">
+      ${syncedAt?`<div class="sync-info">Last synced<br>${timeSince(syncedAt)}</div>`:''}
+      ${syncBtn}
+    </div>
+  </div>
+  ${error?`<div class="error-box">⚠️ ${esc(error)}</div>`:''}
+  ${allClients.length===0&&!error?`<div class="empty dashed"><p style="margin-bottom:14px">No data yet.</p>${syncBtn}</div>`:`
+  <div class="stats">
+    ${[
+      {k:'checkin',e:'📞',label:'Check-in needed'},
+      {k:'discharge',e:'📋',label:'Discharge'},
+      {k:'rebook',e:'📅',label:'Rebook needed'},
+      {k:'active',e:'✅',label:'Active'},
+    ].map(s=>`<div class="stat ${filt===s.k?'on':''}" onclick="setFilt('${s.k}')">
+      <div class="stat-lbl">${s.e} ${s.label}</div>
+      <div class="stat-n">${cnt[s.k]}</div>
+    </div>`).join('')}
+  </div>
+  <div class="filters">
+    <div class="srch">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="qinp" value="${esc(q)}" oninput="setQ(this.value)" placeholder="Search client or practitioner…" />
+    </div>
+    ${['all','checkin','discharge','rebook','active'].map(f=>`<button class="fb ${filt===f?'on':''}" onclick="setFilt('${f}')">${f==='all'?'All':SL[f]}</button>`).join('')}
+  </div>
+  ${list.length===0?`<div class="empty">No clients match this filter.</div>`:`
+  <div class="cards">${list.map(c=>{
+    const left=bizLeft(c.supportEnd);
+    const last=c.appointments&&c.appointments[0];
+    return`<div class="card" onclick="gotoDetail('${c.id}')">
+      <div class="card-top">
+        <div>
+          <div class="card-name">${esc(c.name)}</div>
+          <div class="card-meta">
+            ${c.practitioner?`<span>👤 ${esc(c.practitioner)}</span>`:''}
+            ${last?`<span>📅 Last appt: ${fmt(last.date)}</span>`:'<span>No appointments</span>'}
+            <span>📋 ${(c.appointments||[]).length} appt${(c.appointments||[]).length!==1?'s':''}</span>
+          </div>
+        </div>
+        <div class="card-right">
+          <span class="badge ${SBC[c.status]}">${SL[c.status]}</span>
+          <div class="card-days">${
+            c.status==='discharge'?`Support ended ${fmt(c.supportEnd)}`:
+            c.status==='rebook'?'No recent appointment':
+            c.supportEnd?`${Math.max(0,left)} day${left!==1?'s':''} left (ends ${fmt(c.supportEnd)})`:'—'
+          }</div>
+        </div>
+      </div>
+      ${c.action?`<div class="card-action">
+        <span class="action-tag tag-${c.action.assignee.toLowerCase()}">${c.action.assignee==='Felicity'?'👩‍⚕️':'📋'} Action: ${esc(c.action.assignee)}</span>
+        ${c.action.note?`<span style="font-size:12px;color:#888;flex:1;text-align:right">${esc(c.action.note)}</span>`:''}
+      </div>`:''}
+    </div>`;
+  }).join('')}</div>`}
+  `}`;
+}
+
+function renderDetail(){
+  const c=allClients.find(x=>x.id===selId);
+  if(!c)return'<div class="empty">Client not found.</div>';
+  const left=bizLeft(c.supportEnd);
+  const pct=c.status==='discharge'?100:c.status==='rebook'?0:Math.max(5,Math.round(((10-Math.max(0,left))/10)*100));
+  const appts=c.appointments||[];
+  return`
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:10px">
+    <button class="back" style="margin:0" onclick="setView('list')">← All clients</button>
+    <button class="pri" onclick="sync()" ${syncing?'disabled':''}>${syncing?'<span class="spin"></span> Syncing…':'↻ Refresh'}</button>
+  </div>
+  ${error?`<div class="error-box">⚠️ ${esc(error)}</div>`:''}
+  <div class="det-box">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:10px">
+      <div>
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:4px">${esc(c.name)}</h2>
+        ${c.practitioner?`<p class="sub">👤 ${esc(c.practitioner)}</p>`:''}
+      </div>
+      <span class="badge ${SBC[c.status]}">${SL[c.status]}</span>
+    </div>
+    <div class="mini-grid">
+      <div class="mini"><p>Last appointment</p><p>${fmt(appts[0]?.date)}</p></div>
+      <div class="mini"><p>Support ends</p><p>${c.supportEnd?fmt(c.supportEnd):'—'}</p></div>
+      <div class="mini"><p>Total appointments</p><p>${appts.length}</p></div>
+    </div>
+    ${c.supportEnd?`
+    <div class="prog-row">
+      <span>Follow-up period</span>
+      <span style="color:${SC[c.status]};font-weight:600">${
+        c.status==='discharge'?'Support period ended':
+        c.status==='rebook'?'No active support period':
+        `${Math.max(0,left)} business day${left!==1?'s':''} remaining`
+      }</span>
+    </div>
+    <div class="prog"><div class="prog-fill" style="width:${pct}%;background:${SC[c.status]}"></div></div>`:''}
+  </div>
+
+  <div class="action-box">
+    <h3>Assign action</h3>
+    <div class="assignee-btns">
+      <button class="assignee-btn ${assignee==='Felicity'?'sel-felicity':''}" onclick="setAssignee('Felicity')">👩‍⚕️ Felicity</button>
+      <button class="assignee-btn ${assignee==='Annie'?'sel-annie':''}" onclick="setAssignee('Annie')">📋 Annie</button>
+    </div>
+    <div style="margin-bottom:12px">
+      <textarea placeholder="What needs to be done? (e.g. call to check in, send discharge summary, offer to rebook…)" oninput="actionNote=this.value">${esc(actionNote)}</textarea>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="pri" onclick="saveAction('${c.id}')" ${!assignee?'disabled':''} style="flex:1;justify-content:center">Save action</button>
+      ${c.action?`<button class="sec" onclick="clearAction('${c.id}')">Clear action</button>`:''}
+    </div>
+    ${c.action?`<div style="margin-top:12px;padding:10px 12px;background:#f7f7f5;border-radius:8px;font-size:13px">
+      <strong>Current:</strong> <span class="action-tag tag-${c.action.assignee.toLowerCase()}" style="margin:0 4px">${esc(c.action.assignee)}</span>
+      ${c.action.note?`— ${esc(c.action.note)}`:''}
+    </div>`:''}
+  </div>
+
+  <h3 class="section">Appointment history (${appts.length})</h3>
+  ${appts.length===0?`<div class="empty dashed">No appointments found.</div>`
+  :appts.map((a,i)=>`<div class="ch-item">
+    <div class="ch-icon">${i===0?'⭐':'📅'}</div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span class="ch-name">${i===0?'Most recent':'Appointment'}${i===0?`<span class="latest-tag">latest</span>`:''}</span>
+        <span class="ch-date">${fmt(a.date)}</span>
+      </div>
+      ${a.serviceName?`<p class="ch-service">${esc(a.serviceName)}</p>`:''}
+      ${i===0&&c.supportEnd?`<p class="ch-service" style="color:${SC[c.status]};font-weight:500">Support window: ${fmt(a.date)} → ${fmt(c.supportEnd)}</p>`:''}
+    </div>
+  </div>`).join('')}`;
+}
+
+function setView(v){view=v;render();}
+function setFilt(f){filt=(filt===f&&f!=='all')?'all':f;render();}
+function setQ(val){q=val;render();}
+function gotoDetail(id){selId=id;assignee='';actionNote='';view='detail';render();}
+function setAssignee(a){assignee=(assignee===a)?'':a;render();}
+async function clearAction(clientId){
+  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId,assignee:null})});
+  allClients=allClients.map(c=>c.id===clientId?{...c,action:null}:c);
+  render();
+}
+
+function render(){
+  document.getElementById('app').innerHTML=view==='detail'?renderDetail():renderList();
+}
+
+sync();
+</script>
+</body>
+</html>

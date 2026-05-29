@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: splose-tracker
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: SPLOSE_API_KEY
+        sync: false
