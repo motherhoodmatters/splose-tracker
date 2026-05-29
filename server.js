@@ -1,10 +1,37 @@
-const express=require('express'),path=require('path'),fsm=require('fs'),app=express();
+const express=require('express'),path=require('path'),app=express();
+const {Pool}=require('pg');
 app.use(express.json());
+
 const API_KEY=process.env.SPLOSE_API_KEY||'';
 const BASE='https://api.splose.com/v1';
 const HEADERS={'Authorization':'Bearer '+API_KEY,'User-Agent':'splose-tracker/1.0','Content-Type':'application/json'};
 const CHECKIN_ID=399669;
-const CACHE=path.join(__dirname,'clients-cache.json');
+
+const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false}});
+
+async function initDB(){
+  await pool.query(`CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY,value TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  console.log('DB ready');
+}
+
+async function getCache(key){
+  const r=await pool.query('SELECT value FROM cache WHERE key=$1',[key]);
+  return r.rows.length?JSON.parse(r.rows[0].value):null;
+}
+async function setCache(key,value){
+  await pool.query('INSERT INTO cache(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2,updated_at=NOW()',[key,JSON.stringify(value)]);
+}
+async function getTasks(){
+  const r=await pool.query('SELECT client_id,data FROM tasks');
+  const out={};
+  r.rows.forEach(function(row){out[row.client_id]=JSON.parse(row.data);});
+  return out;
+}
+async function setTasks(clientId,tasks){
+  await pool.query('INSERT INTO tasks(client_id,data,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET data=$2,updated_at=NOW()',[clientId,JSON.stringify(tasks)]);
+}
+
 function wait(ms){return new Promise(r=>setTimeout(r,ms));}
 async function allPages(ep,params){
   params=params||{};
@@ -23,26 +50,28 @@ async function allPages(ep,params){
   }
   return results;
 }
+
 app.use(express.static(path.join(__dirname,'public')));
+
 app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    // Use cache if available and not a full sync
-    if(!fullSync&&fsm.existsSync(CACHE)){
-      const cache=JSON.parse(fsm.readFileSync(CACHE,'utf8'));
-      if(cache&&cache.clients&&cache.clients.length>0){
-        console.log('Serving '+cache.clients.length+' clients from cache');
-        return res.json({clients:cache.clients,syncedAt:cache.savedAt,fromCache:true});
+    const allTasks=await getTasks();
+    if(!fullSync){
+      const cached=await getCache('clients');
+      if(cached&&cached.length>0){
+        console.log('Serving '+cached.length+' clients from DB cache');
+        const clients=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||[]});});
+        return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
-    // Full sync
     console.log('Full sync starting...');
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
     pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
     const patients=await allPages('/patients');
-    console.log(patients.length+' patients found');
+    console.log(patients.length+' patients');
     const clients=[];
     for(var i=0;i<patients.length;i++){
       const p=patients[i];
@@ -55,28 +84,29 @@ app.get('/api/clients',async function(req,res){
       if(!hasRecent){console.log('  skipping');continue;}
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
-      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:[]});
+      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||[]});
     }
-    fsm.writeFileSync(CACHE,JSON.stringify({clients:clients,savedAt:new Date().toISOString()}));
+    await setCache('clients',clients);
     console.log('DONE! '+clients.length+' clients');
     res.json({clients:clients,syncedAt:new Date().toISOString()});
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
-app.post('/api/action',function(req,res){
+
+app.post('/api/action',async function(req,res){
   const clientId=req.body.clientId;
   const tasks=req.body.tasks;
   if(clientId&&tasks!==undefined){
-    try{
-      if(fsm.existsSync(CACHE)){
-        const cache=JSON.parse(fsm.readFileSync(CACHE,'utf8'));
-        cache.clients=cache.clients.map(function(c){
-          if(c.id!==clientId)return c;
-          return Object.assign({},c,{tasks:tasks});
-        });
-        fsm.writeFileSync(CACHE,JSON.stringify(cache));
-      }
-    }catch(e){}
+    await setTasks(clientId,tasks);
+    const cached=await getCache('clients');
+    if(cached){
+      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{tasks:tasks}):c;});
+      await setCache('clients',updated);
+    }
   }
   res.json({ok:true});
 });
-app.listen(process.env.PORT||3000,function(){console.log('Splose Tracker running at http://localhost:'+(process.env.PORT||3000));});
+
+app.listen(process.env.PORT||3000,async function(){
+  await initDB();
+  console.log('Splose Tracker running at http://localhost:'+(process.env.PORT||3000));
+});
