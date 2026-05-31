@@ -12,6 +12,7 @@ const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauth
 async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY,value TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS statuses(client_id TEXT PRIMARY KEY,status TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   console.log('DB ready');
 }
 
@@ -31,6 +32,19 @@ async function getTasks(){
 }
 async function setTasks(clientId,tasks){
   await pool.query('INSERT INTO tasks(client_id,data,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET data=$2,updated_at=NOW()',[clientId,JSON.stringify(tasks)]);
+}
+async function getStatuses(){
+  const r=await pool.query('SELECT client_id,status FROM statuses');
+  const out={};
+  r.rows.forEach(function(row){out[row.client_id]=row.status;});
+  return out;
+}
+async function setStatus(clientId,status){
+  if(status){
+    await pool.query('INSERT INTO statuses(client_id,status,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET status=$2,updated_at=NOW()',[clientId,status]);
+  }else{
+    await pool.query('DELETE FROM statuses WHERE client_id=$1',[clientId]);
+  }
 }
 
 function wait(ms){return new Promise(r=>setTimeout(r,ms));}
@@ -58,12 +72,12 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();
+    const allTasks=await getTasks();const allStatuses=await getStatuses();
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' clients from DB cache');
-        const clients=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+        const clients=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -85,7 +99,7 @@ app.get('/api/clients',async function(req,res){
       if(!hasRecent){console.log('  skipping');continue;}
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
-      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[]});
+      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null});
     }
     await setCache('clients',clients);
     console.log('DONE! '+clients.length+' clients');
@@ -93,6 +107,19 @@ app.get('/api/clients',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+app.post('/api/status',async function(req,res){
+  const clientId=req.body.clientId;
+  const status=req.body.status;
+  if(clientId){
+    await setStatus(clientId,status||null);
+    const cached=await getCache('clients');
+    if(cached){
+      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{manualStatus:status||null}):c;});
+      await setCache('clients',updated);
+    }
+  }
+  res.json({ok:true});
+});
 app.post('/api/action',async function(req,res){
   const clientId=req.body.clientId;
   const tasks=req.body.tasks;

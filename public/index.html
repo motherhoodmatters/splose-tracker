@@ -105,7 +105,7 @@ function fmtDate(s){if(!s)return '-';return new Date(s+'T00:00:00').toLocaleDate
 function ago(iso){var m=Math.round((Date.now()-new Date(iso))/60000);if(m<1)return 'just now';if(m<60)return m+' min ago';return Math.round(m/60)+' hr ago';}
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function autoSt(c){if(!c.lastRealAppt)return 'rebook';var e=addBiz(c.lastRealAppt,10);var l=bizLeft(e);if(l<0)return 'discharge';if(l<=3)return 'checkin';return 'active';}
-function getSt(c){return G.manual[c.id]||autoSt(c);}
+function getSt(c){return G.manual[c.id]||c.manualStatus||autoSt(c);}
 function getEnd(c){if(!c.lastRealAppt)return null;return addBiz(c.lastRealAppt,10);}
 var SL={active:'Active',checkin:'Check-in needed',discharge:'Discharge',rebook:'Rebook needed'};
 var SBC={active:'b-active',checkin:'b-checkin',discharge:'b-discharge',rebook:'b-rebook'};
@@ -123,7 +123,7 @@ function doSync(){
   G.syncing=true;G.error=null;render();
   fetch('/api/clients').then(function(r){return r.json();}).then(function(d){
     if(d.error)throw new Error(d.error);
-    G.manual={};saveLocal();
+    
     G.clients=enrich(d.clients||[]);
     G.syncedAt=d.syncedAt;
     G.syncing=false;render();
@@ -161,11 +161,7 @@ function doRemoveClient(id){
   G.view='list';render();
 }
 
-function doManualStatus(id,s){
-  if(G.manual[id]===s){delete G.manual[id];}else{G.manual[id]=s;}
-  saveLocal();
-  G.clients=G.clients.map(function(c){return c.id===id?Object.assign({},c,{st:getSt(c)}):c;});render();
-}
+function doManualStatus(id,s){var ns=(G.manual[id]===s)?null:s;if(ns){G.manual[id]=ns;}else{delete G.manual[id];}G.clients=G.clients.map(function(c){return c.id===id?Object.assign({},c,{manualStatus:ns,st:ns||autoSt(c)}):c;});fetch('/api/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,status:ns})});render();}
 
 function counts(){
   return{
