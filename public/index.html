@@ -161,7 +161,7 @@ function doRemoveClient(id){
   G.view='list';render();
 }
 
-function doManualStatus(id,s){var ns=(G.manual[id]===s)?null:s;if(ns){G.manual[id]=ns;}else{delete G.manual[id];}G.clients=G.clients.map(function(c){return c.id===id?Object.assign({},c,{manualStatus:ns,st:ns||autoSt(c)}):c;});fetch('/api/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,status:ns})});render();}
+function doManualStatus(id,s){var cur=G.clients.find(function(c){return c.id===id;});var curSt=cur?cur.manualStatus:null;var ns=(curSt===s)?null:s;G.clients=G.clients.map(function(c){return c.id===id?Object.assign({},c,{manualStatus:ns,st:ns||autoSt(c)}):c;});fetch('/api/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,status:ns})});render();}
 
 function counts(){
   return{
