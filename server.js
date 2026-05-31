@@ -109,12 +109,12 @@ app.get('/api/clients',async function(req,res){
 
 app.post('/api/status',async function(req,res){
   const clientId=req.body.clientId;
-  const status=req.body.status;
+  const status=req.body.status||null;
   if(clientId){
-    await setStatus(clientId,status||null);
+    await setStatus(clientId,status);
     const cached=await getCache('clients');
     if(cached){
-      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{manualStatus:status||null}):c;});
+      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{manualStatus:status}):c;});
       await setCache('clients',updated);
     }
   }
