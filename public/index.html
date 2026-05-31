@@ -111,8 +111,8 @@ var SL={active:'Active',checkin:'Check-in needed',discharge:'Discharge',rebook:'
 var SBC={active:'b-active',checkin:'b-checkin',discharge:'b-discharge',rebook:'b-rebook'};
 var SC={active:'#2d7a3a',checkin:'#b85e00',discharge:'#b32020',rebook:'#5b21b6'};
 
-function saveLocal(){try{localStorage.setItem('rm',JSON.stringify(G.removed));localStorage.setItem('mn',JSON.stringify(G.manual));}catch(e){}}
-function loadLocal(){try{var r=localStorage.getItem('rm');if(r)G.removed=JSON.parse(r);var m=localStorage.getItem('mn');if(m)G.manual=JSON.parse(m);}catch(e){}}
+function saveLocal(){}
+function loadLocal(){}
 
 function enrich(raw){
   return raw.filter(function(c){return G.removed.indexOf(c.id)<0;})
