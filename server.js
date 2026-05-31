@@ -62,7 +62,7 @@ app.get('/api/clients',async function(req,res){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' clients from DB cache');
-        const clients=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||[]});});
+        const clients=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
