@@ -26,6 +26,7 @@ async function getTasks(){
   const r=await pool.query('SELECT client_id,data FROM tasks');
   const out={};
   r.rows.forEach(function(row){out[row.client_id]=JSON.parse(row.data);});
+  console.log('Tasks in DB:', Object.keys(out).length, 'clients with tasks:', JSON.stringify(Object.keys(out)));
   return out;
 }
 async function setTasks(clientId,tasks){
