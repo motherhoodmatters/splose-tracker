@@ -37,6 +37,7 @@ async function getStatuses(){
   const r=await pool.query('SELECT client_id,status FROM statuses');
   const out={};
   r.rows.forEach(function(row){out[row.client_id]=row.status;});
+  console.log('Statuses in DB:', JSON.stringify(out));
   return out;
 }
 async function setStatus(clientId,status){
