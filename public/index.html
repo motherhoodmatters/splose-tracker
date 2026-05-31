@@ -156,7 +156,7 @@ function doRemoveTask(cid,tid){
 
 function doRemoveClient(id){
   if(!confirm('Remove this client from the tracker?'))return;
-  G.removed.push(id);saveLocal();
+  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id})});
   G.clients=G.clients.filter(function(c){return c.id!==id;});
   G.view='list';render();
 }

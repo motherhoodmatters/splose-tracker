@@ -13,6 +13,7 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY,value TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS statuses(client_id TEXT PRIMARY KEY,status TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS removed(client_id TEXT PRIMARY KEY,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   console.log('DB ready');
 }
 
@@ -32,6 +33,13 @@ async function getTasks(){
 }
 async function setTasks(clientId,tasks){
   await pool.query('INSERT INTO tasks(client_id,data,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET data=$2,updated_at=NOW()',[clientId,JSON.stringify(tasks)]);
+}
+async function getRemoved(){
+  const r=await pool.query('SELECT client_id FROM removed');
+  return new Set(r.rows.map(function(row){return row.client_id;}));
+}
+async function addRemoved(clientId){
+  await pool.query('INSERT INTO removed(client_id,updated_at) VALUES($1,NOW()) ON CONFLICT(client_id) DO NOTHING',[clientId]);
 }
 async function getStatuses(){
   const r=await pool.query('SELECT client_id,status FROM statuses');
@@ -73,12 +81,12 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();const allStatuses=await getStatuses();
+    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedSet=await getRemoved();
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' clients from DB cache');
-        const clients=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null});});
+        const clients=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -102,12 +110,23 @@ app.get('/api/clients',async function(req,res){
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
       clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null});
     }
-    await setCache('clients',clients);
-    console.log('DONE! '+clients.length+' clients');
-    res.json({clients:clients,syncedAt:new Date().toISOString()});
+    const finalClients=clients.filter(function(c){return !removedSet.has(c.id);});await setCache('clients',finalClients);
+    console.log('DONE! '+finalClients.length+' clients');
+    res.json({clients:finalClients,syncedAt:new Date().toISOString()});
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+app.post('/api/remove',async function(req,res){
+  const clientId=req.body.clientId;
+  if(clientId){
+    await addRemoved(clientId);
+    const cached=await getCache('clients');
+    if(cached){
+      await setCache('clients',cached.filter(function(c){return c.id!==clientId;}));
+    }
+  }
+  res.json({ok:true});
+});
 app.post('/api/status',async function(req,res){
   const clientId=req.body.clientId;
   const status=req.body.status||null;
