@@ -211,7 +211,7 @@ function renderList(){
     var c=list[k];
     var left=bizLeft(c.end);
     var isM=!!G.manual[c.id];
-    var pendingTasks=(c.tasks||[]).filter(function(t){return !t.done;});
+    var pendingTasks=(c.tasks||[]);
     out+='<div class="card" onclick="G.sel=\''+c.id+'\';G.view=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
     out+='<div class="card-top"><div>';
     out+='<div class="card-name">'+esc(c.name)+(isM?' <span style="font-size:11px;color:#0369a1">(manual)</span>':'')+'</div>';
@@ -228,7 +228,7 @@ function renderList(){
       for(var t=0;t<pendingTasks.length;t++){
         var tk=pendingTasks[t];
         out+='<div class="task-row"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a)+'</span>';
-        out+='<span style="flex:1;color:#555">'+esc(tk.n)+'</span></div>';
+        out+='<span style="flex:1;color:'+(tk.done?'#aaa':'#555')+';'+(tk.done?'text-decoration:line-through;':'')+'">'+esc(tk.n)+'</span></div>';
       }
       out+='</div>';
     }
