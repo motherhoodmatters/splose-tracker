@@ -116,6 +116,11 @@ app.get('/api/clients',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+app.get('/api/unremove/:clientId',async function(req,res){
+  await pool.query('DELETE FROM removed WHERE client_id=$1',[req.params.clientId]);
+  console.log('Unremoved client:',req.params.clientId);
+  res.json({ok:true});
+});
 app.post('/api/remove',async function(req,res){
   const clientId=req.body.clientId;
   if(clientId){
