@@ -13,7 +13,7 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY,value TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS statuses(client_id TEXT PRIMARY KEY,status TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS removed(client_id TEXT PRIMARY KEY,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS removed(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
   console.log('DB ready');
 }
 
@@ -35,8 +35,10 @@ async function setTasks(clientId,tasks){
   await pool.query('INSERT INTO tasks(client_id,data,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET data=$2,updated_at=NOW()',[clientId,JSON.stringify(tasks)]);
 }
 async function getRemoved(){
-  const r=await pool.query('SELECT client_id FROM removed');
-  return new Set(r.rows.map(function(row){return row.client_id;}));
+  const r=await pool.query('SELECT client_id,removed_at FROM removed');
+  const out={};
+  r.rows.forEach(function(row){out[row.client_id]=row.removed_at;});
+  return out;
 }
 async function addRemoved(clientId){
   await pool.query('INSERT INTO removed(client_id,updated_at) VALUES($1,NOW()) ON CONFLICT(client_id) DO NOTHING',[clientId]);
@@ -81,12 +83,12 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedSet=await getRemoved();
+    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' clients from DB cache');
-        const clients=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null});});
+        const clients=cached.filter(function(c){return !removedMap[c.id];}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -106,11 +108,24 @@ app.get('/api/clients',async function(req,res){
       const realAppts=appts.filter(function(a){return a.start&&Number(a.serviceId)!==CHECKIN_ID;});
       const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
       if(!hasRecent){console.log('  skipping');continue;}
+      // Auto-restore if removed client has new appointment after removal date
+      const removedAt=removedMap[String(p.id)];
+      if(removedAt){
+        const hasNewAppt=realAppts.some(function(a){return new Date(a.start)>new Date(removedAt);});
+        if(hasNewAppt){
+          console.log('  restoring - new appointment after removal');
+          await pool.query('DELETE FROM removed WHERE client_id=$1',[String(p.id)]);
+          delete removedMap[String(p.id)];
+        } else {
+          console.log('  skipping - removed and no new appointments');
+          continue;
+        }
+      }
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
       clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null});
     }
-    const finalClients=clients.filter(function(c){return !removedSet.has(c.id);});await setCache('clients',finalClients);
+    const finalClients=clients.filter(function(c){return !removedMap[c.id];});await setCache('clients',finalClients);
     console.log('DONE! '+finalClients.length+' clients');
     res.json({clients:finalClients,syncedAt:new Date().toISOString()});
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
