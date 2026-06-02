@@ -175,6 +175,54 @@ app.post('/api/action',async function(req,res){
   res.json({ok:true});
 });
 
+
+app.get('/api/students',async function(req,res){
+  if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
+  const fullSync=req.query.full==='true';
+  try{
+    const allTasks=await getTasks();
+    if(!fullSync){
+      const cached=await getCache('students');
+      if(cached&&cached.length>0){
+        console.log('Serving '+cached.length+' students from cache');
+        const students=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+        return res.json({students:students,syncedAt:new Date().toISOString(),fromCache:true});
+      }
+    }
+    console.log('Full student sync starting...');
+    const pracs=await allPages('/practitioners').catch(function(){return [];});
+    const pnames={};
+    pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
+    const patients=await allPages('/patients');
+    console.log(patients.length+' patients to check for students');
+    const MENTORING_IDS=new Set([399651,399621,425993,425994,399669,415863,416098,416099,416100,416101,416173,425885,437283]);
+    const INTERACTION_IDS=new Set([399651,399621,425993,425994,399669]);
+    const students=[];
+    for(var i=0;i<patients.length;i++){
+      const p=patients[i];
+      const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
+      const appts=await allPages('/appointments',{patientId:p.id});
+      await wait(500);
+      const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
+      if(!mentoringAppts.length)continue;
+      console.log('Student found: '+name);
+      const interactions=mentoringAppts
+        .filter(function(a){return INTERACTION_IDS.has(Number(a.serviceId));})
+        .sort(function(a,b){return new Date(b.start)-new Date(a.start);});
+      students.push({
+        id:String(p.id),
+        name:name,
+        practitioner:pnames[p.practitionerId]||'',
+        appointments:interactions.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===399669};}),
+        tasks:allTasks[String(p.id)]||[]
+      });
+    }
+    await setCache('students',students);
+    console.log('DONE! '+students.length+' students');
+    res.json({students:students,syncedAt:new Date().toISOString()});
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+});
+
 app.listen(process.env.PORT||3000,async function(){
   await initDB();
   console.log('Splose Tracker running at http://localhost:'+(process.env.PORT||3000));

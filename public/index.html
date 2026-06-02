@@ -96,7 +96,8 @@ h3.sec{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 <script>
 var G = {
   clients: [], removed: [], manual: {}, newTask: {a:'', n:''},
-  syncing: false, error: null, view: 'list', sel: null, filt: 'all', q: '', syncedAt: null
+  syncing: false, error: null, view: 'list', sel: null, filt: 'all', q: '', syncedAt: null,
+  tab: 'clients', students: [], studentSyncedAt: null, studentSyncing: false, studentView: 'list', studentSel: null, studentQ: ''
 };
 
 function addBiz(s,n){var d=new Date(s+'T00:00:00');var c=0;while(c<n){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)c++;}return d.toISOString().split('T')[0];}
@@ -119,6 +120,15 @@ function enrich(raw){
     .map(function(c){return Object.assign({},c,{st:getSt(c),end:getEnd(c)});});
 }
 
+function doStudentSync(){
+  G.studentSyncing=true;render();
+  fetch('/api/students').then(function(r){return r.json();}).then(function(d){
+    if(d.error)throw new Error(d.error);
+    G.students=d.students||[];
+    G.studentSyncedAt=d.syncedAt;
+    G.studentSyncing=false;render();
+  }).catch(function(e){G.studentSyncing=false;render();});
+}
 function doSync(){
   G.syncing=true;G.error=null;render();
   fetch('/api/clients').then(function(r){return r.json();}).then(function(d){
@@ -130,7 +140,16 @@ function doSync(){
   }).catch(function(e){G.error=e.message;G.syncing=false;render();});
 }
 
-function doSaveTask(){
+function doSaveStudentTask(){
+  if(!G.newTask.a||!G.studentSel)return;
+  var c=G.students.find(function(x){return x.id===G.studentSel;});
+  if(!c)return;
+  var tasks=(c.tasks||[]).concat([{id:''+Date.now(),assignee:G.newTask.a,note:G.newTask.n,done:false}]);
+  fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:G.studentSel,tasks:tasks})});
+  G.students=G.students.map(function(x){return x.id===G.studentSel?Object.assign({},x,{tasks:tasks}):x;});
+  G.newTask={a:'',n:''};render();
+}
+doSaveTask(){
   if(!G.newTask.a||!G.sel)return;
   var c=G.clients.find(function(x){return x.id===G.sel;});
   if(!c)return;
@@ -181,11 +200,91 @@ function getList(){
   }).sort(function(a,b){return order[a.st]-order[b.st];});
 }
 
+function renderTabs(){
+  return '<div style="display:flex;gap:0;margin-bottom:1.5rem;border-bottom:2px solid #eee">'
+    +'<button onclick="G.tab=\'clients\';render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='clients'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='clients'?'#1a1a1a':'#888')+'">Clients</button>'
+    +'<button onclick="G.tab=\'students\';if(!G.students.length)doStudentSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='students'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='students'?'#1a1a1a':'#888')+'">Students</button>'
+    +'</div>';
+}
+function renderStudentList(){
+  var sb='<button class="pri" onclick="doStudentSync()" '+(G.studentSyncing?'disabled':'')+'>'+(G.studentSyncing?'Syncing...':'Sync Students')+'</button>';
+  var out=renderTabs();
+  out+='<div class="hdr"><div><h1>Students</h1><p class="sub">'+G.students.length+' students</p></div><div class="hdr-right">'+(G.studentSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.studentSyncedAt)+'</div>':'')+sb+'</div></div>';
+  if(!G.students.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students yet.</p>'+sb+'</div>';return out;}
+  out+='<div class="filters"><div class="srch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input value="'+esc(G.studentQ)+'" oninput="G.studentQ=this.value;render()" placeholder="Search students..." /></div></div>';
+  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());});
+  out+='<div class="cards">';
+  for(var i=0;i<list.length;i++){
+    var s=list[i];
+    var pending=(s.tasks||[]).filter(function(t){return !t.done;});
+    out+='<div class="card" onclick="G.studentSel=\''+s.id+'\';G.studentView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
+    out+='<div class="card-top"><div><div class="card-name">'+esc(s.name)+'</div>';
+    out+='<div class="card-meta"><span>'+s.appointments.length+' session'+(s.appointments.length!==1?'s':'')+'</span>';
+    if(s.appointments.length>0)out+='<span>Last: '+fmtDate(s.appointments[0].date)+'</span>';
+    out+='</div></div>';
+    out+='<div class="card-right"><span style="font-size:12px;color:#888">'+pending.length+' task'+(pending.length!==1?'s':'')+' pending</span></div></div>';
+    if(pending.length>0){
+      out+='<div class="card-tasks">';
+      for(var t=0;t<pending.length;t++){
+        var tk=pending[t];
+        out+='<div class="task-row"><span class="task-tag tag-'+(tk.assignee==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee)+'</span><span style="flex:1;color:#555">'+esc(tk.note)+'</span></div>';
+      }
+      out+='</div>';
+    }
+    out+='</div>';
+  }
+  out+='</div>';
+  return out;
+}
+function renderStudentDetail(){
+  var s=G.students.find(function(x){return x.id===G.studentSel;});
+  if(!s)return renderTabs()+'<div class="empty">Not found.</div>';
+  var tasks=s.tasks||[];
+  var out=renderTabs();
+  out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:10px">';
+  out+='<button class="back" style="margin:0" onclick="G.studentView=\'list\';render()">Back to students</button>';
+  out+='</div>';
+  out+='<div class="det-box">';
+  out+='<h2 style="font-size:18px;font-weight:600;margin-bottom:4px">'+esc(s.name)+'</h2>';
+  out+='<div class="mini-grid">';
+  out+='<div class="mini"><p>Total sessions</p><p>'+s.appointments.length+'</p></div>';
+  out+='<div class="mini"><p>Last session</p><p>'+(s.appointments.length?fmtDate(s.appointments[0].date):'-')+'</p></div>';
+  out+='<div class="mini"><p>Tasks pending</p><p>'+tasks.filter(function(t){return !t.done;}).length+'</p></div>';
+  out+='</div></div>';
+  out+='<div class="section-box"><h3>Tasks</h3>';
+  for(var ti=0;ti<tasks.length;ti++){
+    var tk=tasks[ti];
+    out+='<div class="etask etask-'+(tk.assignee==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.5':'')+'"><span class="task-tag tag-'+(tk.assignee==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee)+'</span>';
+    out+='<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'">'+esc(tk.note)+'</span>';
+    out+='<button class="done-btn" onclick="event.stopPropagation();doToggleStudentTask(\''+s.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
+    out+='<button class="done-btn" style="color:#b32020" onclick="event.stopPropagation();doRemoveStudentTask(\''+s.id+'\',\''+tk.id+'\')">x</button>';
+    out+='</div>';
+  }
+  out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px"><div class="assignee-btns">';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Felicity'?'sel-f':'')+'" onclick="G.newTask.a=\'Felicity\';render()">Felicity</button>';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Annie</button>';
+  out+='</div><textarea placeholder="e.g. Module 3 marked, Case study 2 pending..." oninput="G.newTask.n=this.value">'+esc(G.newTask.n)+'</textarea>';
+  out+='<button class="pri" onclick="doSaveStudentTask()" '+(G.newTask.a?'':'disabled')+' style="margin-top:10px;width:100%;justify-content:center">Add task</button>';
+  out+='</div></div>';
+  out+='<h3 class="sec">Session history ('+s.appointments.length+')</h3>';
+  if(!s.appointments.length){out+='<div class="empty dashed">No sessions found.</div>';}
+  else{
+    for(var ai=0;ai<s.appointments.length;ai++){
+      var ap=s.appointments[ai];
+      out+='<div class="ch-item"><div class="ch-icon '+(ap.isCheckin?'ch-call':'ch-appt')+'">'+(ap.isCheckin?'Call':'Session')+'</div>';
+      out+='<div style="flex:1"><div style="display:flex;justify-content:space-between">';
+      out+='<span class="ch-name">'+(ap.isCheckin?'Check-in call':'Mentoring session')+'</span>';
+      out+='<span class="ch-date">'+fmtDate(ap.date)+'</span></div></div></div>';
+    }
+  }
+  return out;
+}
 function renderList(){
+  var tabs=renderTabs();
   var cnt=counts();
   var list=getList();
   var sb='<button class="pri" id="sbtn" onclick="doSync()">'+(G.syncing?'Syncing...':'Sync from Splose')+'</button>';
-  var out='<div class="hdr"><div><h1>Follow-up tracker</h1><p class="sub">'+G.clients.length+' clients</p></div>';
+  var out=tabs+'<div class="hdr"<div><h1>Follow-up tracker</h1><p class="sub">'+G.clients.length+' clients</p></div>';
   out+='<div class="hdr-right">'+(G.syncedAt?'<div class="sync-info">Last synced<br>'+ago(G.syncedAt)+'</div>':'')+sb+'</div></div>';
   if(G.error)out+='<div class="err">Error: '+esc(G.error)+'</div>';
   if(G.clients.length===0&&!G.error){out+='<div class="empty dashed"><p style="margin-bottom:14px">No data yet.</p>'+sb+'</div>';return out;}
