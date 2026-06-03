@@ -243,6 +243,7 @@ function renderStudentDetail(){
   var out=renderTabs();
   out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:10px">';
   out+='<button class="back" style="margin:0" onclick="G.studentView=\'list\';render()">Back to students</button>';
+  out+='<button class="danger" onclick="doRemoveStudent(\''+s.id+'\')" style="margin-left:8px">Remove student</button>';
   out+='</div>';
   out+='<div class="det-box">';
   out+='<h2 style="font-size:18px;font-weight:600;margin-bottom:4px">'+esc(s.name)+'</h2>';
