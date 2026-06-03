@@ -132,6 +132,13 @@ app.get('/api/clients',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+app.get('/api/clearremoved',async function(req,res){
+  await pool.query('DELETE FROM removed');
+  await setCache('clients',null);
+  await setCache('students',null);
+  console.log('Cleared all removed entries');
+  res.json({ok:true,message:'All removed entries cleared'});
+});
 app.get('/api/unremove/:clientId',async function(req,res){
   await pool.query('DELETE FROM removed WHERE client_id=$1',[req.params.clientId]);
   console.log('Unremoved client:',req.params.clientId);
