@@ -421,7 +421,13 @@ function renderDetail(){
 }
 
 function render(){
-  document.getElementById('root').innerHTML=G.view==='detail'?renderDetail():renderList();
+  var html;
+  if(G.tab==='students'){
+    html=G.studentView==='detail'?renderStudentDetail():renderStudentList();
+  } else {
+    html=G.view==='detail'?renderDetail():renderList();
+  }
+  document.getElementById('root').innerHTML=html;
 }
 
 loadLocal();
