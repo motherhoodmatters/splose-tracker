@@ -149,7 +149,7 @@ function doSaveStudentTask(){
   G.students=G.students.map(function(x){return x.id===G.studentSel?Object.assign({},x,{tasks:tasks}):x;});
   G.newTask={a:'',n:''};render();
 }
-doSaveTask(){
+function doSaveTask(){
   if(!G.newTask.a||!G.sel)return;
   var c=G.clients.find(function(x){return x.id===G.sel;});
   if(!c)return;
