@@ -206,8 +206,8 @@ app.get('/api/students',async function(req,res){
     pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
     const patients=await allPages('/patients');
     console.log(patients.length+' patients to check for students');
-    const MENTORING_IDS=new Set([399651,425993,425994,415863,416098,416099,416100,416101,416173,425885,437283]);
-    const INTERACTION_IDS=new Set([399651,425993,425994,399669]);
+    const MENTORING_IDS=new Set([399651,415863,416098,416099,416100,416101,416173,425885,437283]);
+    const INTERACTION_IDS=new Set([399651,399621,399669]);
     const students=[];
     for(var i=0;i<patients.length;i++){
       const p=patients[i];
