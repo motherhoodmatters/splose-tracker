@@ -93,6 +93,7 @@ h3.sec{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 </head>
 <body>
 <div class="wrap" id="root"></div>
+<!-- v1780475348 -->
 <script>
 var G = {
   clients: [], removed: [], manual: {}, newTask: {a:'', n:''},
@@ -173,6 +174,12 @@ function doRemoveTask(cid,tid){
   G.clients=G.clients.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});render();
 }
 
+function doRemoveStudent(id){
+  if(!confirm('Remove this student from the tracker?'))return;
+  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id})});
+  G.students=G.students.filter(function(s){return s.id!==id;});
+  G.studentView='list';render();
+}
 function doRemoveClient(id){
   if(!confirm('Remove this client from the tracker?'))return;
   fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id})});

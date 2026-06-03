@@ -145,6 +145,10 @@ app.post('/api/remove',async function(req,res){
     if(cached){
       await setCache('clients',cached.filter(function(c){return c.id!==clientId;}));
     }
+    const studentCached=await getCache('students');
+    if(studentCached){
+      await setCache('students',studentCached.filter(function(c){return c.id!==clientId;}));
+    }
   }
   res.json({ok:true});
 });
