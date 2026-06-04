@@ -6,6 +6,7 @@ const API_KEY=process.env.SPLOSE_API_KEY||'';
 const BASE='https://api.splose.com/v1';
 const HEADERS={'Authorization':'Bearer '+API_KEY,'User-Agent':'splose-tracker/1.0','Content-Type':'application/json'};
 const CHECKIN_ID=399669;
+const STUDENT_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283,425993,425994]);
 
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false},connectionTimeoutMillis:10000,idleTimeoutMillis:30000,max:3});
 
@@ -109,6 +110,9 @@ app.get('/api/clients',async function(req,res){
       const realAppts=appts.filter(function(a){return a.start&&Number(a.serviceId)!==CHECKIN_ID;});
       const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
       if(!hasRecent){console.log('  skipping');continue;}
+      // Skip if all appointments are student/mentoring services
+      const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
+      if(!hasNonStudentAppt){console.log('  skipping - student only');continue;}
       // Auto-restore if removed client has new appointment after removal date
       const removedAt=removedMap[String(p.id)];
       if(removedAt){
