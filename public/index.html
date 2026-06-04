@@ -176,13 +176,13 @@ function doRemoveTask(cid,tid){
 
 function doRemoveStudent(id){
   if(!confirm('Remove this student from the tracker?'))return;
-  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id})});
+  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'students'})});
   G.students=G.students.filter(function(s){return s.id!==id;});
   G.studentView='list';render();
 }
 function doRemoveClient(id){
   if(!confirm('Remove this client from the tracker?'))return;
-  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id})});
+  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'clients'})});
   G.clients=G.clients.filter(function(c){return c.id!==id;});
   G.view='list';render();
 }
