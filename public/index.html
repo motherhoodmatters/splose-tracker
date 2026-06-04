@@ -371,7 +371,7 @@ function renderStudentDetail(){
   for(var ti=0;ti<tasks.length;ti++){
     var tk=tasks[ti];
     out+='<div class="etask etask-'+(tk.assignee==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.5':'')+'"><span class="task-tag tag-'+(tk.assignee==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee)+'</span>';
-    out+='<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'">'+esc(tk.note)+'</span>';
+    out+=(G.editingTask===tk.id+'_s'?'<input value="'+esc(tk.note||tk.n||'')+'" id="sedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+s.id+'\',\''+tk.id+'\',document.getElementById(\'sedit_'+ti+'\').value,\'students\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+s.id+'\',\''+tk.id+'\',this.value,\'students\')" />':'<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'_s\';render()">'+esc(tk.note||tk.n||'')+'</span>');
     out+='<button class="done-btn" onclick="event.stopPropagation();doToggleStudentTask(\''+s.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
     out+='<button class="done-btn" style="color:#b32020" onclick="event.stopPropagation();doRemoveStudentTask(\''+s.id+'\',\''+tk.id+'\')">x</button>';
     out+='</div>';
@@ -502,7 +502,7 @@ function renderDetail(){
   for(var ti=0;ti<tasks.length;ti++){
     var tk=tasks[ti];
     out+='<div class="etask etask-'+(tk.a==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.5':'')+'"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a)+'</span>';
-    out+='<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'">'+esc(tk.n)+'</span>';
+    out+=(G.editingTask===tk.id+'_c'?'<input value="'+esc(tk.n||'')+'" id="cedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'cedit_'+ti+'\').value,\'clients\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'clients\')" />':'<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'_c\';render()">'+esc(tk.n||tk.note||'')+'</span>');
     out+='<button class="done-btn" onclick="doToggleTask(\''+c.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
     out+='<button class="done-btn" style="color:#b32020" onclick="doRemoveTask(\''+c.id+'\',\''+tk.id+'\')">x</button>';
     out+='</div>';
