@@ -196,6 +196,12 @@ function doRemoveOnboarding(id){
   G.onboarding=G.onboarding.filter(function(c){return c.id!==id;});
   G.onboardingView='list';render();
 }
+async function doRemoveOnboardingTask(cid,tid){
+  var c=G.onboarding.find(function(x){return x.id===cid;});if(!c)return;
+  var tasks=(c.tasks||[]).filter(function(t){return t.id!==tid;});
+  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});render();
+}
 async function doToggleOnboardingTask(cid,tid){
   var c=G.onboarding.find(function(x){return x.id===cid;});if(!c)return;
   var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{done:!t.done}):t;});
@@ -269,6 +275,7 @@ function renderOnboardingDetail(){
       out+='<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'\';render()">'+esc(tk.n)+'</span>';
     }
     out+='<button class="done-btn" onclick="event.stopPropagation();doToggleOnboardingTask(\''+c.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
+    out+='<button class="done-btn" style="color:#b32020" onclick="event.stopPropagation();doRemoveOnboardingTask(\'\'+c.id+\'\',\'\'+tk.id+\'\')" >x</button>';
     out+='</div>';
   }
   out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px;margin-top:8px"><div class="assignee-btns">';
