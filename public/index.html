@@ -211,7 +211,7 @@ async function doToggleOnboardingTask(cid,tid){
 async function doSaveOnboardingTask(){
   if(!G.newTask.a||!G.onboardingSel)return;
   var c=G.onboarding.find(function(x){return x.id===G.onboardingSel;});if(!c)return;
-  var tasks=(c.tasks||[]).concat([{id:''+Date.now(),assignee:G.newTask.a,n:G.newTask.n,done:false}]);
+  var tasks=(c.tasks||[]).concat([{id:''+Date.now(),a:G.newTask.a,n:G.newTask.n,done:false}]);
   await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:G.onboardingSel,tasks:tasks})});
   G.onboarding=G.onboarding.map(function(x){return x.id===G.onboardingSel?Object.assign({},x,{tasks:tasks}):x;});
   G.newTask={a:'',n:''};render();
@@ -268,7 +268,7 @@ function renderOnboardingDetail(){
   for(var ti=0;ti<tasks.length;ti++){
     var tk=tasks[ti];
     var isEditing=G.editingTask===tk.id;
-    out+='<div class="etask etask-a" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-annie">Annie</span>';
+    out+='<div class="etask etask-a" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+(tk.a||'Annie')+'</span>';
     if(isEditing){
       out+='<input value="'+esc(tk.n)+'" id="edit_'+tk.id+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'edit_'+tk.id+'\').value,\'onboarding\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'onboarding\')" />';
     } else {
