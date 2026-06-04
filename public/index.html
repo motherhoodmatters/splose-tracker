@@ -98,7 +98,7 @@ h3.sec{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 var G = {
   clients: [], removed: [], manual: {}, newTask: {a:'', n:''},
   syncing: false, error: null, view: 'list', sel: null, filt: 'all', q: '', syncedAt: null,
-  tab: 'clients', students: [], studentSyncedAt: null, studentSyncing: false, studentView: 'list', studentSel: null, studentQ: ''
+  tab: 'clients', students: [], studentSyncedAt: null, studentSyncing: false, studentView: 'list', studentSel: null, studentQ: '', onboarding: [], onboardingSyncedAt: null, onboardingSyncing: false, onboardingView: 'list', onboardingSel: null, editingTask: null
 };
 
 function addBiz(s,n){var d=new Date(s+'T00:00:00');var c=0;while(c<n){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)c++;}return d.toISOString().split('T')[0];}
@@ -121,6 +121,15 @@ function enrich(raw){
     .map(function(c){return Object.assign({},c,{st:getSt(c),end:getEnd(c)});});
 }
 
+function doOnboardingSync(){
+  G.onboardingSyncing=true;render();
+  fetch('/api/onboarding').then(function(r){return r.json();}).then(function(d){
+    if(d.error)throw new Error(d.error);
+    G.onboarding=d.clients||[];
+    G.onboardingSyncedAt=d.syncedAt;
+    G.onboardingSyncing=false;render();
+  }).catch(function(e){G.onboardingSyncing=false;render();});
+}
 function doStudentSync(){
   G.studentSyncing=true;render();
   fetch('/api/students').then(function(r){return r.json();}).then(function(d){
@@ -180,6 +189,97 @@ function doRemoveStudent(id){
   G.students=G.students.filter(function(s){return s.id!==id;});
   G.studentView='list';render();
 }
+
+function doRemoveOnboarding(id){
+  if(!confirm('Mark onboarding complete and remove from this list?'))return;
+  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'onboarding'})});
+  G.onboarding=G.onboarding.filter(function(c){return c.id!==id;});
+  G.onboardingView='list';render();
+}
+async function doToggleOnboardingTask(cid,tid){
+  var c=G.onboarding.find(function(x){return x.id===cid;});if(!c)return;
+  var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{done:!t.done}):t;});
+  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});render();
+}
+async function doSaveOnboardingTask(){
+  if(!G.newTask.a||!G.onboardingSel)return;
+  var c=G.onboarding.find(function(x){return x.id===G.onboardingSel;});if(!c)return;
+  var tasks=(c.tasks||[]).concat([{id:''+Date.now(),assignee:G.newTask.a,n:G.newTask.n,done:false}]);
+  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:G.onboardingSel,tasks:tasks})});
+  G.onboarding=G.onboarding.map(function(x){return x.id===G.onboardingSel?Object.assign({},x,{tasks:tasks}):x;});
+  G.newTask={a:'',n:''};render();
+}
+async function doEditTask(cid,tid,newNote,listType){
+  var list=listType==='onboarding'?G.onboarding:listType==='students'?G.students:G.clients;
+  var c=list.find(function(x){return x.id===cid;});if(!c)return;
+  var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{n:newNote}):t;});
+  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  if(listType==='onboarding')G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
+  else if(listType==='students')G.students=G.students.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
+  else G.clients=G.clients.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
+  G.editingTask=null;render();
+}
+function renderOnboardingList(){
+  var sb='<button class="pri" onclick="doOnboardingSync()" '+(G.onboardingSyncing?'disabled':'')+'>'+(G.onboardingSyncing?'Syncing...':'Sync Onboarding')+'</button>';
+  var out=renderTabs();
+  out+='<div class="hdr"><div><h1>Onboarding</h1><p class="sub">'+G.onboarding.length+' new clients</p></div><div class="hdr-right">'+(G.onboardingSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.onboardingSyncedAt)+'</div>':'')+sb+'</div></div>';
+  if(!G.onboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No new clients to onboard.</p>'+sb+'</div>';return out;}
+  out+='<div class="cards">';
+  for(var i=0;i<G.onboarding.length;i++){
+    var c=G.onboarding[i];
+    var tasks=c.tasks||[];
+    var done=tasks.filter(function(t){return t.done;}).length;
+    var total=tasks.length;
+    var pct=total?Math.round((done/total)*100):0;
+    out+='<div class="card" onclick="G.onboardingSel=\''+c.id+'\';G.onboardingView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
+    out+='<div class="card-top"><div><div class="card-name">'+esc(c.name)+'</div>';
+    out+='<div class="card-meta"><span>First appt: '+fmtDate(c.firstAppt)+'</span></div></div>';
+    out+='<div class="card-right"><span style="font-size:13px;font-weight:600;color:'+(pct===100?'#2d7a3a':'#1a1a1a')+'">'+done+'/'+total+' done</span>';
+    out+='<div class="card-days"><div style="width:80px;height:4px;background:#eee;border-radius:2px;margin-top:4px"><div style="width:'+pct+'%;height:100%;background:'+(pct===100?'#2d7a3a':'#1a1a1a')+';border-radius:2px"></div></div></div>';
+    out+='</div></div></div>';
+  }
+  out+='</div>';
+  return out;
+}
+function renderOnboardingDetail(){
+  var c=G.onboarding.find(function(x){return x.id===G.onboardingSel;});
+  if(!c)return renderTabs()+'<div class="empty">Not found.</div>';
+  var tasks=c.tasks||[];
+  var done=tasks.filter(function(t){return t.done;}).length;
+  var out=renderTabs();
+  out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:10px">';
+  out+='<button class="back" style="margin:0" onclick="G.onboardingView=\'list\';render()">Back to onboarding</button>';
+  out+='<button class="danger" onclick="doRemoveOnboarding(\''+c.id+'\')">Onboarding complete</button>';
+  out+='</div>';
+  out+='<div class="det-box"><h2 style="font-size:18px;font-weight:600;margin-bottom:4px">'+esc(c.name)+'</h2>';
+  out+='<div class="mini-grid">';
+  out+='<div class="mini"><p>First appointment</p><p>'+fmtDate(c.firstAppt)+'</p></div>';
+  out+='<div class="mini"><p>Checklist progress</p><p>'+done+' of '+tasks.length+' done</p></div>';
+  out+='<div class="mini"><p>Practitioner</p><p>'+(c.practitioner||'Not set')+'</p></div>';
+  out+='</div></div>';
+  out+='<div class="section-box"><h3>Onboarding checklist</h3>';
+  for(var ti=0;ti<tasks.length;ti++){
+    var tk=tasks[ti];
+    var isEditing=G.editingTask===tk.id;
+    out+='<div class="etask etask-a" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-annie">Annie</span>';
+    if(isEditing){
+      out+='<input value="'+esc(tk.n)+'" id="edit_'+tk.id+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'edit_'+tk.id+'\').value,\'onboarding\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'onboarding\')" />';
+    } else {
+      out+='<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'\';render()">'+esc(tk.n)+'</span>';
+    }
+    out+='<button class="done-btn" onclick="event.stopPropagation();doToggleOnboardingTask(\''+c.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
+    out+='</div>';
+  }
+  out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px;margin-top:8px"><div class="assignee-btns">';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Felicity'?'sel-f':'')+'" onclick="G.newTask.a=\'Felicity\';render()">Felicity</button>';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Annie</button>';
+  out+='</div><textarea placeholder="Add extra task..." oninput="G.newTask.n=this.value">'+esc(G.newTask.n)+'</textarea>';
+  out+='<button class="pri" onclick="doSaveOnboardingTask()" '+(G.newTask.a?'':'disabled')+' style="margin-top:10px;width:100%;justify-content:center">Add task</button>';
+  out+='</div></div>';
+  return out;
+}
+
 function doRemoveClient(id){
   if(!confirm('Remove this client from the tracker?'))return;
   fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'clients'})});
@@ -210,7 +310,7 @@ function getList(){
 function renderTabs(){
   return '<div style="display:flex;gap:0;margin-bottom:1.5rem;border-bottom:2px solid #eee">'
     +'<button onclick="G.tab=\'clients\';render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='clients'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='clients'?'#1a1a1a':'#888')+'">Clients</button>'
-    +'<button onclick="G.tab=\'students\';if(!G.students.length)doStudentSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='students'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='students'?'#1a1a1a':'#888')+'">Students</button>'
+    +'<button onclick="G.tab=\'students\';if(!G.students.length)doStudentSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='students'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='students'?'#1a1a1a':'#888')+'">Students</button>'+'<button onclick="G.tab=\'onboarding\';if(!G.onboarding.length)doOnboardingSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='onboarding'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='onboarding'?'#1a1a1a':'#888')+'">Onboarding</button>'
     +'</div>';
 }
 function renderStudentList(){
@@ -432,6 +532,8 @@ function render(){
   var html;
   if(G.tab==='students'){
     html=G.studentView==='detail'?renderStudentDetail():renderStudentList();
+  } else if(G.tab==='onboarding'){
+    html=G.onboardingView==='detail'?renderOnboardingDetail():renderOnboardingList();
   } else {
     html=G.view==='detail'?renderDetail():renderList();
   }
