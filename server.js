@@ -16,6 +16,8 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS statuses(client_id TEXT PRIMARY KEY,status TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS removed(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`ALTER TABLE removed ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ DEFAULT NOW()`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS removed_students(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS removed_onboarding(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
   console.log('DB ready');
 }
 
@@ -41,6 +43,20 @@ async function getRemoved(){
   const out={};
   r.rows.forEach(function(row){out[row.client_id]=row.removed_at;});
   return out;
+}
+async function getStudentRemoved(){
+  const r=await pool.query('SELECT client_id FROM removed_students');
+  return new Set(r.rows.map(function(row){return row.client_id;}));
+}
+async function addStudentRemoved(clientId){
+  await pool.query('INSERT INTO removed_students(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
+}
+async function getOnboardingRemoved(){
+  const r=await pool.query('SELECT client_id FROM removed_onboarding');
+  return new Set(r.rows.map(function(row){return row.client_id;}));
+}
+async function addOnboardingRemoved(clientId){
+  await pool.query('INSERT INTO removed_onboarding(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
 }
 async function addRemoved(clientId){
   await pool.query('INSERT INTO removed(client_id,updated_at) VALUES($1,NOW()) ON CONFLICT(client_id) DO NOTHING',[clientId]);
@@ -85,7 +101,7 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();
+    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
@@ -150,15 +166,20 @@ app.get('/api/unremove/:clientId',async function(req,res){
 });
 app.post('/api/remove',async function(req,res){
   const clientId=req.body.clientId;
+  const list=req.body.list||'clients';
   if(clientId){
-    await addRemoved(clientId);
-    const cached=await getCache('clients');
-    if(cached){
-      await setCache('clients',cached.filter(function(c){return c.id!==clientId;}));
-    }
-    const studentCached=await getCache('students');
-    if(studentCached){
-      await setCache('students',studentCached.filter(function(c){return c.id!==clientId;}));
+    if(list==='students'){
+      await addStudentRemoved(clientId);
+      const cached=await getCache('students');
+      if(cached)await setCache('students',cached.filter(function(c){return c.id!==clientId;}));
+    } else if(list==='onboarding'){
+      await addOnboardingRemoved(clientId);
+      const cached=await getCache('onboarding');
+      if(cached)await setCache('onboarding',cached.filter(function(c){return c.id!==clientId;}));
+    } else {
+      await addRemoved(clientId);
+      const cached=await getCache('clients');
+      if(cached)await setCache('clients',cached.filter(function(c){return c.id!==clientId;}));
     }
   }
   res.json({ok:true});
