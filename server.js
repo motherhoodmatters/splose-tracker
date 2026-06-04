@@ -259,6 +259,43 @@ app.get('/api/students',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+
+app.get('/api/onboarding',async function(req,res){
+  if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
+  try{
+    const allTasks=await getTasks();
+    const onboardingRemovedSet=await getOnboardingRemoved();
+    const cached=await getCache('onboarding');
+    if(cached){
+      const clients=cached.filter(function(c){return !onboardingRemovedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+      return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
+    }
+    const pracs=await allPages('/practitioners').catch(function(){return [];});
+    const pnames={};
+    pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
+    const patients=await allPages('/patients');
+    const DT=[{id:'ob1',assignee:'Annie',n:'Contact card sent to Felicity',done:false},{id:'ob2',assignee:'Annie',n:'Registration',done:false},{id:'ob3',assignee:'Annie',n:'Consent',done:false},{id:'ob4',assignee:'Annie',n:'Safety Checklist if Home',done:false},{id:'ob5',assignee:'Annie',n:'Address to consult if home',done:false},{id:'ob6',assignee:'Annie',n:'DOB and Medicare (if applicable) added',done:false},{id:'ob7',assignee:'Annie',n:'Joined Circle',done:false},{id:'ob8',assignee:'Annie',n:'Circle chat opened and welcome message sent',done:false}];
+    const clients=[];
+    for(var i=0;i<patients.length;i++){
+      const p=patients[i];
+      const name=((p.firstname||'')+ ' '+(p.lastname||'')).trim()||'Patient '+p.id;
+      const appts=await allPages('/appointments',{patientId:p.id});
+      await wait(500);
+      if(!appts.length)continue;
+      const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(a.start)-new Date(b.start);});
+      const firstAppt=sorted[0];
+      if(!firstAppt||firstAppt.start<'2026-06-04')continue;
+      if(onboardingRemovedSet.has(String(p.id)))continue;
+      const existingTasks=allTasks[String(p.id)];
+      const tasks=existingTasks||DT.map(function(t){return Object.assign({},t,{id:t.id+'_'+p.id});});
+      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',firstAppt:firstAppt.start.split('T')[0],tasks:tasks});
+    }
+    await setCache('onboarding',clients);
+    console.log('DONE onboarding: '+clients.length+' clients');
+    res.json({clients:clients,syncedAt:new Date().toISOString()});
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+});
+
 app.listen(process.env.PORT||3000,async function(){
   await initDB();
   console.log('Splose Tracker running at http://localhost:'+(process.env.PORT||3000));
