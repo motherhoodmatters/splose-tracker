@@ -18,6 +18,7 @@ async function initDB(){
   await pool.query(`ALTER TABLE removed ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ DEFAULT NOW()`);
   await pool.query(`CREATE TABLE IF NOT EXISTS removed_students(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS removed_onboarding(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   console.log('DB ready');
 }
 
@@ -60,6 +61,15 @@ async function addOnboardingRemoved(clientId){
 }
 async function addRemoved(clientId){
   await pool.query('INSERT INTO removed(client_id,updated_at) VALUES($1,NOW()) ON CONFLICT(client_id) DO NOTHING',[clientId]);
+}
+async function getOnboardingTasks(){
+  const r=await pool.query('SELECT client_id,data FROM onboarding_tasks');
+  const out={};
+  r.rows.forEach(function(row){out[row.client_id]=JSON.parse(row.data);});
+  return out;
+}
+async function setOnboardingTasks(clientId,tasks){
+  await pool.query('INSERT INTO onboarding_tasks(client_id,data,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET data=$2,updated_at=NOW()',[clientId,JSON.stringify(tasks)]);
 }
 async function getStatuses(){
   const r=await pool.query('SELECT client_id,status FROM statuses');
@@ -184,6 +194,19 @@ app.post('/api/remove',async function(req,res){
   }
   res.json({ok:true});
 });
+app.post('/api/onboarding-action',async function(req,res){
+  const clientId=req.body.clientId;
+  const tasks=req.body.tasks;
+  if(clientId&&tasks!==undefined){
+    await setOnboardingTasks(clientId,tasks);
+    const cached=await getCache('onboarding');
+    if(cached){
+      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{tasks:tasks}):c;});
+      await setCache('onboarding',updated);
+    }
+  }
+  res.json({ok:true});
+});
 app.post('/api/status',async function(req,res){
   const clientId=req.body.clientId;
   const status=req.body.status||null;
@@ -263,7 +286,7 @@ app.get('/api/students',async function(req,res){
 app.get('/api/onboarding',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   try{
-    const allTasks=await getTasks();
+    const allTasks=await getOnboardingTasks();
     const onboardingRemovedSet=await getOnboardingRemoved();
     const cached=await getCache('onboarding');
     if(cached){

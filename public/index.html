@@ -200,20 +200,20 @@ window._delOB=function(btn){var cid=btn.getAttribute('data-cid');var tid=btn.get
 async function doRemoveOnboardingTask(cid,tid){
   var c=G.onboarding.find(function(x){return x.id===cid;});if(!c)return;
   var tasks=(c.tasks||[]).filter(function(t){return t.id!==tid;});
-  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
   G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});render();
 }
 async function doToggleOnboardingTask(cid,tid){
   var c=G.onboarding.find(function(x){return x.id===cid;});if(!c)return;
   var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{done:!t.done}):t;});
-  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
   G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});render();
 }
 async function doSaveOnboardingTask(){
   if(!G.newTask.a||!G.onboardingSel)return;
   var c=G.onboarding.find(function(x){return x.id===G.onboardingSel;});if(!c)return;
   var tasks=(c.tasks||[]).concat([{id:''+Date.now(),a:G.newTask.a,n:G.newTask.n,done:false}]);
-  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:G.onboardingSel,tasks:tasks})});
+  await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:G.onboardingSel,tasks:tasks})});
   G.onboarding=G.onboarding.map(function(x){return x.id===G.onboardingSel?Object.assign({},x,{tasks:tasks}):x;});
   G.newTask={a:'',n:''};render();
 }
@@ -222,7 +222,7 @@ async function doEditTask(cid,tid,newNote,listType){
   var c=list.find(function(x){return x.id===cid;});if(!c)return;
   var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{n:newNote}):t;});
   await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
-  if(listType==='onboarding')G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
+  if(listType==='onboarding'){await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});}
   else if(listType==='students')G.students=G.students.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
   else G.clients=G.clients.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
   G.editingTask=null;render();
