@@ -136,6 +136,7 @@ app.get('/api/clients',async function(req,res){
       const realAppts=appts.filter(function(a){return a.start&&Number(a.serviceId)!==CHECKIN_ID;});
       const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
       if(!hasRecent){console.log('  skipping');continue;}
+      if(p.practitionerId&&String(p.practitionerId)!=='66624'){console.log('  skipping - not Felicity');continue;}
       // Skip if all appointments are student/mentoring services
       const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
       if(!hasNonStudentAppt){console.log('  skipping - student only');continue;}
@@ -264,6 +265,7 @@ app.get('/api/students',async function(req,res){
       await wait(500);
       const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
       if(!mentoringAppts.length)continue;
+      if(p.practitionerId&&String(p.practitionerId)!=='66624'){console.log('  skipping student - not Felicity');continue;}
       console.log('Student found: '+name);
       const interactions=mentoringAppts
         .filter(function(a){return INTERACTION_IDS.has(Number(a.serviceId));})
