@@ -265,7 +265,6 @@ app.get('/api/students',async function(req,res){
       await wait(500);
       const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
       if(!mentoringAppts.length)continue;
-      if(p.practitionerId&&String(p.practitionerId)!=='66624'){console.log('  skipping student - not Felicity');continue;}
       console.log('Student found: '+name);
       const interactions=mentoringAppts
         .filter(function(a){return INTERACTION_IDS.has(Number(a.serviceId));})
