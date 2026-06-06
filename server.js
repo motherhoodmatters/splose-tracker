@@ -245,11 +245,15 @@ app.get('/api/students',async function(req,res){
       const cached=await getCache('students');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' students from cache');
-        const students=cached.map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+        const removedStudents=await getStudentRemoved();
+        const students=cached.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
         return res.json({students:students,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
     console.log('Full student sync starting...');
+    const studentRemovedRows=await pool.query('SELECT client_id,removed_at FROM removed_students');
+    const studentRemovedMap={};
+    studentRemovedRows.rows.forEach(function(r){studentRemovedMap[r.client_id]=r.removed_at;});
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
     pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
@@ -265,6 +269,15 @@ app.get('/api/students',async function(req,res){
       await wait(500);
       const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
       if(!mentoringAppts.length)continue;
+      const studentRemovedAt=studentRemovedMap?studentRemovedMap[String(p.id)]:null;
+      if(studentRemovedAt){
+        const hasNewAppt=mentoringAppts.some(function(a){return new Date(a.start)>new Date(studentRemovedAt);});
+        if(hasNewAppt){
+          await pool.query('DELETE FROM removed_students WHERE client_id=$1',[String(p.id)]);
+        } else {
+          continue;
+        }
+      }
       console.log('Student found: '+name);
       const interactions=mentoringAppts
         .filter(function(a){return INTERACTION_IDS.has(Number(a.serviceId));})
