@@ -2,6 +2,8 @@ const express=require('express'),path=require('path'),app=express();
 const {Pool}=require('pg');
 app.use(express.json());
 
+
+
 const API_KEY=process.env.SPLOSE_API_KEY||'';
 const BASE='https://api.splose.com/v1';
 const HEADERS={'Authorization':'Bearer '+API_KEY,'User-Agent':'splose-tracker/1.0','Content-Type':'application/json'};
@@ -19,6 +21,7 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS removed_students(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS removed_onboarding(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  
   console.log('DB ready');
 }
 
@@ -331,6 +334,83 @@ app.get('/api/onboarding',async function(req,res){
     console.log('DONE onboarding: '+clients.length+' clients');
     res.json({clients:clients,syncedAt:new Date().toISOString()});
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+});
+
+
+// Get chat link for a client
+app.get('/api/chat-link/:clientId',async function(req,res){
+  const token=await getOrCreateToken(req.params.clientId);
+  const base=process.env.APP_URL||'https://splose-tracker.onrender.com';
+  res.json({url:base+'/chat/'+token});
+});
+
+// Check PIN status / verify PIN
+app.post('/api/chat/verify',async function(req,res){
+  const{token,pin}=req.body;
+  const r=await pool.query('SELECT client_id,pin_hash FROM chat_tokens WHERE token=$1',[token]);
+  if(!r.rows.length)return res.status(404).json({error:'Invalid link'});
+  if(!r.rows[0].pin_hash)return res.json({needsSetup:true});
+  if(r.rows[0].pin_hash!==hashPin(pin))return res.status(401).json({error:'Wrong PIN. Try again.'});
+  res.json({ok:true,clientId:r.rows[0].client_id});
+});
+
+// Set PIN (first time)
+app.post('/api/chat/setup',async function(req,res){
+  const{token,pin}=req.body;
+  if(!token||!pin||pin.length<4)return res.status(400).json({error:'PIN must be 4 digits'});
+  const r=await pool.query('SELECT client_id,pin_hash FROM chat_tokens WHERE token=$1',[token]);
+  if(!r.rows.length)return res.status(404).json({error:'Invalid link'});
+  if(r.rows[0].pin_hash)return res.status(400).json({error:'PIN already set'});
+  await pool.query('UPDATE chat_tokens SET pin_hash=$1 WHERE token=$2',[hashPin(pin),token]);
+  res.json({ok:true,clientId:r.rows[0].client_id});
+});
+
+// Get messages
+app.get('/api/chat/messages/:token',async function(req,res){
+  const r=await pool.query('SELECT client_id FROM chat_tokens WHERE token=$1',[req.params.token]);
+  if(!r.rows.length)return res.status(404).json({error:'Invalid'});
+  const msgs=await pool.query('SELECT id,from_type,body,created_at FROM messages WHERE client_id=$1 ORDER BY created_at ASC',[r.rows[0].client_id]);
+  await pool.query('UPDATE chat_tokens SET last_read=NOW() WHERE token=$1',[req.params.token]);
+  res.json({messages:msgs.rows,clientId:r.rows[0].client_id});
+});
+
+// Send message as client
+app.post('/api/chat/send',async function(req,res){
+  const{token,pin,body}=req.body;
+  if(!body||!body.trim())return res.status(400).json({error:'Empty message'});
+  const r=await pool.query('SELECT client_id,pin_hash FROM chat_tokens WHERE token=$1',[token]);
+  if(!r.rows.length)return res.status(404).json({error:'Invalid'});
+  if(r.rows[0].pin_hash!==hashPin(pin))return res.status(401).json({error:'Wrong PIN'});
+  await pool.query('INSERT INTO messages(client_id,from_type,body) VALUES($1,$2,$3)',[r.rows[0].client_id,'client',body.trim()]);
+  res.json({ok:true});
+});
+
+// Send message as practitioner
+app.post('/api/chat/reply',async function(req,res){
+  const{clientId,body}=req.body;
+  if(!body||!body.trim())return res.status(400).json({error:'Empty message'});
+  await pool.query('INSERT INTO messages(client_id,from_type,body) VALUES($1,$2,$3)',[clientId,'practitioner',body.trim()]);
+  res.json({ok:true});
+});
+
+// Get all conversations for practitioner
+app.get('/api/chat/conversations',async function(req,res){
+  const r=await pool.query(`
+    SELECT ct.client_id,
+    m.body as last_message, m.from_type as last_from, m.created_at as last_time,
+    (SELECT COUNT(*) FROM messages m2 WHERE m2.client_id=ct.client_id AND m2.from_type='client' AND (ct.last_read IS NULL OR m2.created_at>ct.last_read)) as unread
+    FROM chat_tokens ct
+    LEFT JOIN LATERAL (SELECT body,from_type,created_at FROM messages WHERE client_id=ct.client_id ORDER BY created_at DESC LIMIT 1) m ON true
+    ORDER BY m.created_at DESC NULLS LAST
+  `);
+  res.json({conversations:r.rows});
+});
+
+// Get messages for practitioner (by clientId)
+app.get('/api/chat/thread/:clientId',async function(req,res){
+  const msgs=await pool.query('SELECT id,from_type,body,created_at FROM messages WHERE client_id=$1 ORDER BY created_at ASC',[req.params.clientId]);
+  await pool.query('UPDATE chat_tokens SET last_read=NOW() WHERE client_id=$1',[req.params.clientId]);
+  res.json({messages:msgs.rows});
 });
 
 app.listen(process.env.PORT||3000,async function(){
