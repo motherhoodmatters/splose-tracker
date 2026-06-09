@@ -413,6 +413,73 @@ app.get('/api/chat/thread/:clientId',async function(req,res){
   res.json({messages:msgs.rows});
 });
 
+
+app.get('/api/student-onboarding',async function(req,res){
+  if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
+  try{
+    const allTasks=await getOnboardingTasks();
+    const removedSet=await getOnboardingRemoved();
+    const cached=await getCache('student-onboarding');
+    if(cached){
+      console.log('Serving '+cached.length+' student onboarding from cache');
+      const students=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+      return res.json({clients:students,syncedAt:new Date().toISOString(),fromCache:true});
+    }
+    console.log('Building student onboarding list...');
+    const patients=await allPages('/patients');
+    const ACCEPTANCE_ID=444486;
+    const DEFAULT_TASKS=[
+      {id:'so1',a:'Annie',n:"T's & C's Sent",done:false},
+      {id:'so2',a:'Annie',n:"T's & C's Signed",done:false},
+      {id:'so3',a:'Annie',n:'Deposit Invoice sent',done:false},
+      {id:'so4',a:'Annie',n:'Deposit Paid',done:false},
+      {id:'so5',a:'Annie',n:'Signed Mentor Agreement & Application Email sent',done:false},
+      {id:'so6',a:'Annie',n:'Application successful',done:false},
+      {id:'so7',a:'Annie',n:'Circle invite sent',done:false},
+      {id:'so8',a:'Annie',n:'Circle Released',done:false},
+      {id:'so9',a:'Annie',n:'Welcome Direct message sent on Circle',done:false},
+      {id:'so10',a:'Annie',n:'Emailed FH to confirm they are in',done:false},
+      {id:'so11',a:'Annie',n:'Added to 2122',done:false}
+    ];
+    const clients=[];
+    for(var i=0;i<patients.length;i++){
+      const p=patients[i];
+      const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
+      const appts=await allPages('/appointments',{patientId:p.id});
+      await wait(500);
+      const acceptanceAppts=appts.filter(function(a){return Number(a.serviceId)===ACCEPTANCE_ID;});
+      if(!acceptanceAppts.length)continue;
+      if(removedSet.has(String(p.id)))continue;
+      const sorted=acceptanceAppts.sort(function(a,b){return new Date(b.start)-new Date(a.start);});
+      const existingTasks=allTasks[String(p.id)];
+      const tasks=existingTasks||DEFAULT_TASKS.map(function(t){return Object.assign({},t,{id:t.id+'_'+p.id});});
+      clients.push({
+        id:String(p.id),
+        name:name,
+        firstAppt:sorted[sorted.length-1].start.split('T')[0],
+        program:null,
+        tasks:tasks
+      });
+    }
+    await setCache('student-onboarding',clients);
+    console.log('DONE student onboarding: '+clients.length);
+    res.json({clients:clients,syncedAt:new Date().toISOString()});
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+});
+
+app.post('/api/student-onboarding/program',async function(req,res){
+  const{clientId,program}=req.body;
+  if(!clientId)return res.status(400).json({error:'clientId required'});
+  try{
+    const cached=await getCache('student-onboarding');
+    if(cached){
+      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{program:program}):c;});
+      await setCache('student-onboarding',updated);
+    }
+    res.json({ok:true});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
 app.listen(process.env.PORT||3000,async function(){
   await initDB();
   console.log('Splose Tracker running at http://localhost:'+(process.env.PORT||3000));

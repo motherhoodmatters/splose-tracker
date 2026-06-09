@@ -97,7 +97,7 @@ h3.sec{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 var G = {
   clients: [], removed: [], manual: {}, newTask: {a:'', n:''},
   syncing: false, error: null, view: 'list', sel: null, filt: 'all', q: '', syncedAt: null,
-  tab: 'clients', students: [], studentSyncedAt: null, studentSyncing: false, studentView: 'list', studentSel: null, studentQ: '', onboarding: [], onboardingSyncedAt: null, onboardingSyncing: false, onboardingView: 'list', onboardingSel: null, editingTask: null
+  tab: 'clients', students: [], studentSyncedAt: null, studentSyncing: false, studentView: 'list', studentSel: null, studentQ: '', onboarding: [], onboardingSyncedAt: null, onboardingSyncing: false, onboardingView: 'list', onboardingSel: null, editingTask: null, studentOnboarding: [], soSyncedAt: null, soSyncing: false, soView: 'list', soSel: null
 };
 
 function addBiz(s,n){var d=new Date(s+'T00:00:00');var c=0;while(c<n){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)c++;}return d.toISOString().split('T')[0];}
@@ -120,6 +120,15 @@ function enrich(raw){
     .map(function(c){return Object.assign({},c,{st:getSt(c),end:getEnd(c)});});
 }
 
+function doStudentOnboardingSync(){
+  G.soSyncing=true;render();
+  fetch('/api/student-onboarding').then(function(r){return r.json();}).then(function(d){
+    if(d.error)throw new Error(d.error);
+    G.studentOnboarding=d.clients||[];
+    G.soSyncedAt=d.syncedAt;
+    G.soSyncing=false;render();
+  }).catch(function(e){G.soSyncing=false;render();});
+}
 function doOnboardingSync(){
   G.onboardingSyncing=true;render();
   fetch('/api/onboarding').then(function(r){return r.json();}).then(function(d){
@@ -300,6 +309,105 @@ function renderOnboardingDetail(){
   out+='</div></div>';
   return out;
 }
+
+function doSetProgram(id,program){
+  var cur=G.studentOnboarding.find(function(x){return x.id===id;});
+  if(!cur)return;
+  var newProg=cur.program===program?null:program;
+  G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===id?Object.assign({},x,{program:newProg}):x;});
+  fetch('/api/student-onboarding/program',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,program:newProg})});
+  render();
+}
+async function doToggleSOTask(cid,tid){
+  var c=G.studentOnboarding.find(function(x){return x.id===cid;});if(!c)return;
+  var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{done:!t.done}):t;});
+  await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});render();
+}
+async function doRemoveSOTask(cid,tid){
+  var c=G.studentOnboarding.find(function(x){return x.id===cid;});if(!c)return;
+  var tasks=(c.tasks||[]).filter(function(t){return t.id!==tid;});
+  await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});render();
+}
+async function doSaveSOTask(){
+  if(!G.newTask.a||!G.soSel)return;
+  var c=G.studentOnboarding.find(function(x){return x.id===G.soSel;});if(!c)return;
+  var tasks=(c.tasks||[]).concat([{id:''+Date.now(),a:G.newTask.a,n:G.newTask.n,done:false}]);
+  await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:G.soSel,tasks:tasks})});
+  G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===G.soSel?Object.assign({},x,{tasks:tasks}):x;});
+  G.newTask={a:'',n:''};render();
+}
+function doRemoveStudentOnboarding(id){
+  if(!confirm('Mark student onboarding complete and remove?'))return;
+  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'onboarding'})});
+  G.studentOnboarding=G.studentOnboarding.filter(function(c){return c.id!==id;});
+  G.soView='list';render();
+}
+function renderSOList(){
+  var sb='<button class="pri" onclick="doStudentOnboardingSync()" '+(G.soSyncing?'disabled':'')+'>'+( G.soSyncing?'Syncing...':'Sync Student Onboarding')+'</button>';
+  var out=renderTabs();
+  out+='<div class="hdr"><div><h1>Student Onboarding</h1><p class="sub">'+G.studentOnboarding.length+' students</p></div><div class="hdr-right">'+(G.soSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.soSyncedAt)+'</div>':'')+sb+'</div></div>';
+  if(!G.studentOnboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students to onboard.</p>'+sb+'</div>';return out;}
+  out+='<div class="cards">';
+  for(var i=0;i<G.studentOnboarding.length;i++){
+    var c=G.studentOnboarding[i];
+    var tasks=c.tasks||[];
+    var done=tasks.filter(function(t){return t.done;}).length;
+    var total=tasks.length;
+    var pct=total?Math.round((done/total)*100):0;
+    out+='<div class="card" onclick="G.soSel=\''+c.id+'\';G.soView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
+    out+='<div class="card-top"><div><div class="card-name">'+esc(c.name)+'</div>';
+    out+='<div class="card-meta"><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:'+(c.program==='LEP'?'#ede9fe':c.program==='Pathway 3'?'#fce7f3':'#f1f5f9')+';color:'+(c.program==='LEP'?'#5b21b6':c.program==='Pathway 3'?'#9d174d':'#94a3b8')+'">'+(c.program||'No program set')+'</span></div></div>';
+    out+='<div class="card-right"><span style="font-size:13px;font-weight:600;color:'+(pct===100?'#2d7a3a':'#1a1a1a')+'">'+done+'/'+total+' done</span>';
+    out+='<div style="width:80px;height:4px;background:#eee;border-radius:2px;margin-top:4px"><div style="width:'+pct+'%;height:100%;background:'+(pct===100?'#2d7a3a':'#1a1a1a')+';border-radius:2px"></div></div>';
+    out+='</div></div></div>';
+  }
+  out+='</div>';
+  return out;
+}
+function renderSODetail(){
+  var c=G.studentOnboarding.find(function(x){return x.id===G.soSel;});
+  if(!c)return renderTabs()+'<div class="empty">Not found.</div>';
+  var tasks=c.tasks||[];
+  var done=tasks.filter(function(t){return t.done;}).length;
+  var out=renderTabs();
+  out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:10px">';
+  out+='<button class="back" style="margin:0" onclick="G.soView=\'list\';render()">Back to student onboarding</button>';
+  out+='<button class="danger" onclick="doRemoveStudentOnboarding(\''+c.id+'\')">Onboarding complete</button>';
+  out+='</div>';
+  out+='<div class="det-box"><h2 style="font-size:18px;font-weight:600;margin-bottom:8px">'+esc(c.name)+'</h2>';
+  out+='<div style="display:flex;gap:8px;margin-bottom:12px;">';
+  out+='<button onclick="doSetProgram(\''+c.id+'\',\'LEP\')" style="padding:6px 16px;border-radius:6px;border:2px solid '+(c.program==='LEP'?'#5b21b6':'#e2e8f0')+';background:'+(c.program==='LEP'?'#ede9fe':'white')+';color:'+(c.program==='LEP'?'#5b21b6':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;">LEP</button>';
+  out+='<button onclick="doSetProgram(\''+c.id+'\',\'Pathway 3\')" style="padding:6px 16px;border-radius:6px;border:2px solid '+(c.program==='Pathway 3'?'#9d174d':'#e2e8f0')+';background:'+(c.program==='Pathway 3'?'#fce7f3':'white')+';color:'+(c.program==='Pathway 3'?'#9d174d':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;">Pathway 3</button>';
+  out+='</div>';
+  out+='<div class="mini-grid"><div class="mini"><p>First appointment</p><p>'+fmtDate(c.firstAppt)+'</p></div>';
+  out+='<div class="mini"><p>Progress</p><p>'+done+' of '+tasks.length+' done</p></div>';
+  out+='<div class="mini"><p>Program</p><p>'+(c.program||'Not set')+'</p></div></div></div>';
+  out+='<div class="section-box"><h3>Onboarding checklist</h3>';
+  for(var ti=0;ti<tasks.length;ti++){
+    var tk=tasks[ti];
+    var isEditing=G.editingTask===tk.id;
+    var ta=tk.a||'Annie';
+    out+='<div class="etask etask-'+(ta==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-'+(ta==='Felicity'?'felicity':'annie')+'">'+esc(ta)+'</span>';
+    if(isEditing){
+      out+='<input value="'+esc(tk.n||'')+'" id="soedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'soedit_'+ti+'\').value,\'onboarding\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'onboarding\')" />';
+    } else {
+      out+='<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'\';render()">'+esc(tk.n||'')+'</span>';
+    }
+    out+='<button class="done-btn" onclick="event.stopPropagation();doToggleSOTask(\''+c.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
+    out+='<button class="done-btn" style="color:#b32020" onclick="event.stopPropagation();doRemoveSOTask(\''+c.id+'\',\''+tk.id+'\')">x</button>';
+    out+='</div>';
+  }
+  out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px;margin-top:8px"><div class="assignee-btns">';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Felicity'?'sel-f':'')+'" onclick="G.newTask.a=\'Felicity\';render()">Felicity</button>';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Annie</button>';
+  out+='</div><textarea placeholder="Add extra note..." oninput="G.newTask.n=this.value">'+esc(G.newTask.n)+'</textarea>';
+  out+='<button class="pri" onclick="doSaveSOTask()" '+(G.newTask.a?'':'disabled')+' style="margin-top:10px;width:100%;justify-content:center">Add task</button>';
+  out+='</div></div>';
+  return out;
+}
+
 function doRemoveClient(id){
   if(!confirm('Remove this client from the tracker?'))return;
   fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'clients'})});
@@ -330,9 +438,12 @@ function getList(){
 function renderTabs(){
   return '<div style="display:flex;gap:0;margin-bottom:1.5rem;border-bottom:2px solid #eee">'
     +'<button onclick="G.tab=\'clients\';render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='clients'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='clients'?'#1a1a1a':'#888')+'">Clients</button>'
-    +'<button onclick="G.tab=\'students\';if(!G.students.length)doStudentSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='students'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='students'?'#1a1a1a':'#888')+'">Students</button>'+'<button onclick="G.tab=\'onboarding\';if(!G.onboarding.length)doOnboardingSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='onboarding'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='onboarding'?'#1a1a1a':'#888')+'">Onboarding</button>'
+    +'<button onclick="G.tab=\'students\';if(!G.students.length)doStudentSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='students'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='students'?'#1a1a1a':'#888')+'">Students</button>'
+    +'<button onclick="G.tab=\'onboarding\';if(!G.onboarding.length)doOnboardingSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='onboarding'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='onboarding'?'#1a1a1a':'#888')+'">Onboarding</button>'
+    +'<button onclick="G.tab=\'studentOnboarding\';if(!G.studentOnboarding.length)doStudentOnboardingSync();render()" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-bottom:'+(G.tab==='studentOnboarding'?'2px solid #1a1a1a':'2px solid transparent')+';margin-bottom:-2px;color:'+(G.tab==='studentOnboarding'?'#1a1a1a':'#888')+'">Student Onboarding</button>'
     +'</div>';
 }
+
 function renderStudentList(){
   var sb='<button class="pri" onclick="doStudentSync()" '+(G.studentSyncing?'disabled':'')+'>'+(G.studentSyncing?'Syncing...':'Sync Students')+'</button>';
   var out=renderTabs();
@@ -554,6 +665,8 @@ function render(){
     html=G.studentView==='detail'?renderStudentDetail():renderStudentList();
   } else if(G.tab==='onboarding'){
     html=G.onboardingView==='detail'?renderOnboardingDetail():renderOnboardingList();
+  } else if(G.tab==='studentOnboarding'){
+    html=G.soView==='detail'?renderSODetail():renderSOList();
   } else {
     html=G.view==='detail'?renderDetail():renderList();
   }
