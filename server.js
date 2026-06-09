@@ -415,59 +415,62 @@ app.get('/api/chat/thread/:clientId',async function(req,res){
 
 
 app.get('/api/student-onboarding',async function(req,res){
-  if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   try{
     const allTasks=await getOnboardingTasks();
     const removedSet=await getOnboardingRemoved();
-    const cached=await getCache('student-onboarding');
-    if(cached){
-      console.log('Serving '+cached.length+' student onboarding from cache');
-      const students=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
-      return res.json({clients:students,syncedAt:new Date().toISOString(),fromCache:true});
-    }
-    console.log('Building student onboarding list...');
-    const ACCEPTANCE_ID=444486;
-    const DEFAULT_TASKS=[
-      {id:'so1',a:'Annie',n:"T's & C's Sent",done:false},
-      {id:'so2',a:'Annie',n:"T's & C's Signed",done:false},
-      {id:'so3',a:'Annie',n:'Deposit Invoice sent',done:false},
-      {id:'so4',a:'Annie',n:'Deposit Paid',done:false},
-      {id:'so5',a:'Annie',n:'Signed Mentor Agreement & Application Email sent',done:false},
-      {id:'so6',a:'Annie',n:'Application successful',done:false},
-      {id:'so7',a:'Annie',n:'Circle invite sent',done:false},
-      {id:'so8',a:'Annie',n:'Circle Released',done:false},
-      {id:'so9',a:'Annie',n:'Welcome Direct message sent on Circle',done:false},
-      {id:'so10',a:'Annie',n:'Emailed FH to confirm they are in',done:false},
-      {id:'so11',a:'Annie',n:'Added to 2122',done:false}
-    ];
-    // Only fetch acceptance appointments from today onwards - much faster!
-    const recentAppts=await allPages('/appointments',{serviceId:ACCEPTANCE_ID});
-    console.log('Found '+recentAppts.length+' acceptance appointments');
-    const patientIds=[...new Set(recentAppts.map(function(a){return String(a.patientId);}))];
-    const clients=[];
-    for(var i=0;i<patientIds.length;i++){
-      const pid=patientIds[i];
-      if(removedSet.has(pid))continue;
-      const patientAppts=recentAppts.filter(function(a){return String(a.patientId)===pid;});
-      const sorted=patientAppts.sort(function(a,b){return new Date(a.start)-new Date(b.start);});
-      const pData=await fetch('https://api.splose.com/v1/patients/'+pid,{headers:HEADERS}).then(function(r){return r.json();}).catch(function(){return {};});
-      await wait(300);
-      const name=((pData.firstname||'')+' '+(pData.lastname||'')).trim()||'Patient '+pid;
-      const existingTasks=allTasks[pid];
-      const tasks=existingTasks||DEFAULT_TASKS.map(function(t){return Object.assign({},t,{id:t.id+'_'+pid});});
-      clients.push({
-        id:pid,
-        name:name,
-        firstAppt:sorted[0].start.split('T')[0],
-        program:null,
-        tasks:tasks
-      });
-    }
-    await setCache('student-onboarding',clients);
-    console.log('DONE student onboarding: '+clients.length);
-    res.json({clients:clients,syncedAt:new Date().toISOString()});
-  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+    const cached=await getCache('student-onboarding')||[];
+    const students=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+    res.json({clients:students,syncedAt:new Date().toISOString()});
+  }catch(err){res.status(500).json({error:err.message});}
 });
+
+app.post('/api/student-onboarding/add',async function(req,res){
+  const{name,program}=req.body;
+  if(!name)return res.status(400).json({error:'Name required'});
+  try{
+    const id='so_'+require('crypto').randomBytes(8).toString('hex');
+    const DEFAULT_TASKS=[
+      {id:'so1_'+id,a:'Annie',n:"T's & C's Sent",done:false},
+      {id:'so2_'+id,a:'Annie',n:"T's & C's Signed",done:false},
+      {id:'so3_'+id,a:'Annie',n:'Deposit Invoice sent',done:false},
+      {id:'so4_'+id,a:'Annie',n:'Deposit Paid',done:false},
+      {id:'so5_'+id,a:'Annie',n:'Signed Mentor Agreement & Application Email sent',done:false},
+      {id:'so6_'+id,a:'Annie',n:'Application successful',done:false},
+      {id:'so7_'+id,a:'Annie',n:'Circle invite sent',done:false},
+      {id:'so8_'+id,a:'Annie',n:'Circle Released',done:false},
+      {id:'so9_'+id,a:'Annie',n:'Welcome Direct message sent on Circle',done:false},
+      {id:'so10_'+id,a:'Annie',n:'Emailed FH to confirm they are in',done:false},
+      {id:'so11_'+id,a:'Annie',n:'Added to 2122',done:false}
+    ];
+    const newStudent={id:id,name:name,program:program||null,firstAppt:new Date().toISOString().split('T')[0],tasks:DEFAULT_TASKS};
+    const cached=await getCache('student-onboarding')||[];
+    await setCache('student-onboarding',[...cached,newStudent]);
+    res.json({ok:true,student:newStudent});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
+app.post('/api/student-onboarding/complete',async function(req,res){
+  const{clientId}=req.body;
+  if(!clientId)return res.status(400).json({error:'clientId required'});
+  try{
+    // Remove from onboarding
+    await addOnboardingRemoved(clientId);
+    const cached=await getCache('student-onboarding')||[];
+    const student=cached.find(function(c){return c.id===clientId;});
+    await setCache('student-onboarding',cached.filter(function(c){return c.id!==clientId;}));
+    // Add to students list if not already there
+    if(student){
+      const studentCache=await getCache('students')||[];
+      const exists=studentCache.find(function(c){return c.name===student.name;});
+      if(!exists){
+        const newStudent={id:clientId,name:student.name,practitioner:'',appointments:[],tasks:[],program:student.program};
+        await setCache('students',[...studentCache,newStudent]);
+      }
+    }
+    res.json({ok:true});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
 
 app.post('/api/student-onboarding/program',async function(req,res){
   const{clientId,program}=req.body;

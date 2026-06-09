@@ -121,13 +121,31 @@ function enrich(raw){
 }
 
 function doStudentOnboardingSync(){
-  G.soSyncing=true;render();
   fetch('/api/student-onboarding').then(function(r){return r.json();}).then(function(d){
-    if(d.error)throw new Error(d.error);
     G.studentOnboarding=d.clients||[];
     G.soSyncedAt=d.syncedAt;
-    G.soSyncing=false;render();
-  }).catch(function(e){G.soSyncing=false;render();});
+    render();
+  });
+}
+
+function doAddStudentOnboarding(){
+  var name=prompt('Student name:');
+  if(!name||!name.trim())return;
+  var program=confirm('Click OK for LEP, Cancel for Pathway 3')?'LEP':'Pathway 3';
+  fetch('/api/student-onboarding/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim(),program:program})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){G.studentOnboarding.push(d.student);render();}
+    });
+}
+
+function doCompleteStudentOnboarding(id){
+  if(!confirm('Mark onboarding complete and move to Students list?'))return;
+  fetch('/api/student-onboarding/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id})})
+    .then(function(){
+      G.studentOnboarding=G.studentOnboarding.filter(function(c){return c.id!==id;});
+      G.soView='list';render();
+    });
 }
 function doOnboardingSync(){
   G.onboardingSyncing=true;render();
@@ -339,16 +357,13 @@ async function doSaveSOTask(){
   G.newTask={a:'',n:''};render();
 }
 function doRemoveStudentOnboarding(id){
-  if(!confirm('Mark student onboarding complete and remove?'))return;
-  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'onboarding'})});
-  G.studentOnboarding=G.studentOnboarding.filter(function(c){return c.id!==id;});
-  G.soView='list';render();
+  doCompleteStudentOnboarding(id);
 }
 function renderSOList(){
-  var sb='<button class="pri" onclick="doStudentOnboardingSync()" '+(G.soSyncing?'disabled':'')+'>'+( G.soSyncing?'Syncing...':'Sync Student Onboarding')+'</button>';
   var out=renderTabs();
-  out+='<div class="hdr"><div><h1>Student Onboarding</h1><p class="sub">'+G.studentOnboarding.length+' students</p></div><div class="hdr-right">'+(G.soSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.soSyncedAt)+'</div>':'')+sb+'</div></div>';
-  if(!G.studentOnboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students to onboard.</p>'+sb+'</div>';return out;}
+  out+='<div class="hdr"><div><h1>Student Onboarding</h1><p class="sub">'+G.studentOnboarding.length+' student'+(G.studentOnboarding.length!==1?'s':'')+'</p></div>';
+  out+='<div class="hdr-right"><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div></div>';
+  if(!G.studentOnboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students to onboard.</p><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div>';return out;}
   out+='<div class="cards">';
   for(var i=0;i<G.studentOnboarding.length;i++){
     var c=G.studentOnboarding[i];
@@ -356,12 +371,22 @@ function renderSOList(){
     var done=tasks.filter(function(t){return t.done;}).length;
     var total=tasks.length;
     var pct=total?Math.round((done/total)*100):0;
+    var pending=tasks.filter(function(t){return !t.done;});
     out+='<div class="card" onclick="G.soSel=\''+c.id+'\';G.soView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
     out+='<div class="card-top"><div><div class="card-name">'+esc(c.name)+'</div>';
     out+='<div class="card-meta"><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:'+(c.program==='LEP'?'#ede9fe':c.program==='Pathway 3'?'#fce7f3':'#f1f5f9')+';color:'+(c.program==='LEP'?'#5b21b6':c.program==='Pathway 3'?'#9d174d':'#94a3b8')+'">'+(c.program||'No program set')+'</span></div></div>';
     out+='<div class="card-right"><span style="font-size:13px;font-weight:600;color:'+(pct===100?'#2d7a3a':'#1a1a1a')+'">'+done+'/'+total+' done</span>';
     out+='<div style="width:80px;height:4px;background:#eee;border-radius:2px;margin-top:4px"><div style="width:'+pct+'%;height:100%;background:'+(pct===100?'#2d7a3a':'#1a1a1a')+';border-radius:2px"></div></div>';
-    out+='</div></div></div>';
+    out+='</div></div>';
+    if(pending.length>0){
+      out+='<div class="card-tasks">';
+      pending.slice(0,3).forEach(function(t){
+        out+='<div class="task-row"><span class="task-tag tag-'+(t.a==='Felicity'?'felicity':'annie')+'">'+esc(t.a||'Annie')+'</span><span style="flex:1;color:#555;font-size:12px;">'+esc(t.n)+'</span></div>';
+      });
+      if(pending.length>3)out+='<div style="font-size:11px;color:#888;padding:2px 0;">+'+( pending.length-3)+' more</div>';
+      out+='</div>';
+    }
+    out+='</div>';
   }
   out+='</div>';
   return out;
