@@ -441,7 +441,7 @@ app.get('/api/student-onboarding',async function(req,res){
       {id:'so11',a:'Annie',n:'Added to 2122',done:false}
     ];
     // Only fetch acceptance appointments from today onwards - much faster!
-    const recentAppts=await allPages('/appointments',{serviceId:ACCEPTANCE_ID,startFrom:'2026-06-09'});
+    const recentAppts=await allPages('/appointments',{serviceId:ACCEPTANCE_ID});
     console.log('Found '+recentAppts.length+' acceptance appointments');
     const patientIds=[...new Set(recentAppts.map(function(a){return String(a.patientId);}))];
     const clients=[];
