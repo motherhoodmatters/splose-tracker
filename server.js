@@ -447,7 +447,7 @@ app.get('/api/student-onboarding',async function(req,res){
       const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
       const appts=await allPages('/appointments',{patientId:p.id});
       await wait(500);
-      const acceptanceAppts=appts.filter(function(a){return Number(a.serviceId)===ACCEPTANCE_ID;});
+      const acceptanceAppts=appts.filter(function(a){return Number(a.serviceId)===ACCEPTANCE_ID&&a.start>='2026-06-09';});
       if(!acceptanceAppts.length)continue;
       if(removedSet.has(String(p.id)))continue;
       const sorted=acceptanceAppts.sort(function(a,b){return new Date(b.start)-new Date(a.start);});
