@@ -426,7 +426,6 @@ app.get('/api/student-onboarding',async function(req,res){
       return res.json({clients:students,syncedAt:new Date().toISOString(),fromCache:true});
     }
     console.log('Building student onboarding list...');
-    const patients=await allPages('/patients');
     const ACCEPTANCE_ID=444486;
     const DEFAULT_TASKS=[
       {id:'so1',a:'Annie',n:"T's & C's Sent",done:false},
@@ -441,22 +440,25 @@ app.get('/api/student-onboarding',async function(req,res){
       {id:'so10',a:'Annie',n:'Emailed FH to confirm they are in',done:false},
       {id:'so11',a:'Annie',n:'Added to 2122',done:false}
     ];
+    // Only fetch acceptance appointments from today onwards - much faster!
+    const recentAppts=await allPages('/appointments',{serviceId:ACCEPTANCE_ID,startFrom:'2026-06-09'});
+    console.log('Found '+recentAppts.length+' acceptance appointments');
+    const patientIds=[...new Set(recentAppts.map(function(a){return String(a.patientId);}))];
     const clients=[];
-    for(var i=0;i<patients.length;i++){
-      const p=patients[i];
-      const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
-      const appts=await allPages('/appointments',{patientId:p.id});
-      await wait(500);
-      const acceptanceAppts=appts.filter(function(a){return Number(a.serviceId)===ACCEPTANCE_ID&&a.start>='2026-06-09';});
-      if(!acceptanceAppts.length)continue;
-      if(removedSet.has(String(p.id)))continue;
-      const sorted=acceptanceAppts.sort(function(a,b){return new Date(b.start)-new Date(a.start);});
-      const existingTasks=allTasks[String(p.id)];
-      const tasks=existingTasks||DEFAULT_TASKS.map(function(t){return Object.assign({},t,{id:t.id+'_'+p.id});});
+    for(var i=0;i<patientIds.length;i++){
+      const pid=patientIds[i];
+      if(removedSet.has(pid))continue;
+      const patientAppts=recentAppts.filter(function(a){return String(a.patientId)===pid;});
+      const sorted=patientAppts.sort(function(a,b){return new Date(a.start)-new Date(b.start);});
+      const pData=await fetch('https://api.splose.com/v1/patients/'+pid,{headers:HEADERS}).then(function(r){return r.json();}).catch(function(){return {};});
+      await wait(300);
+      const name=((pData.firstname||'')+' '+(pData.lastname||'')).trim()||'Patient '+pid;
+      const existingTasks=allTasks[pid];
+      const tasks=existingTasks||DEFAULT_TASKS.map(function(t){return Object.assign({},t,{id:t.id+'_'+pid});});
       clients.push({
-        id:String(p.id),
+        id:pid,
         name:name,
-        firstAppt:sorted[sorted.length-1].start.split('T')[0],
+        firstAppt:sorted[0].start.split('T')[0],
         program:null,
         tasks:tasks
       });
