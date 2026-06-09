@@ -257,11 +257,11 @@ async function doSaveOnboardingTask(){
   G.newTask={a:'',n:''};render();
 }
 async function doEditTask(cid,tid,newNote,listType){
-  var list=listType==='onboarding'?G.onboarding:listType==='students'?G.students:G.clients;
+  var list=listType==='onboarding'?G.onboarding:listType==='studentOnboarding'?G.studentOnboarding:listType==='students'?G.students:G.clients;
   var c=list.find(function(x){return x.id===cid;});if(!c)return;
   var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{n:newNote}):t;});
   await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
-  if(listType==='onboarding'){await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});}
+  if(listType==='onboarding'||listType==='studentOnboarding'){await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});if(listType==='studentOnboarding'){G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});}else{G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});}}
   else if(listType==='students')G.students=G.students.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
   else G.clients=G.clients.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
   G.editingTask=null;render();
@@ -416,7 +416,7 @@ function renderSODetail(){
     var ta=tk.a||'Annie';
     out+='<div class="etask etask-'+(ta==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-'+(ta==='Felicity'?'felicity':'annie')+'">'+esc(ta)+'</span>';
     if(isEditing){
-      out+='<input value="'+esc(tk.n||'')+'" id="soedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'soedit_'+ti+'\').value,\'onboarding\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'onboarding\')" />';
+      out+='<input value="'+esc(tk.n||'')+'" id="soedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'soedit_'+ti+'\').value,\'studentOnboarding\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'onboarding\')" />';
     } else {
       out+='<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'\';render()">'+esc(tk.n||'')+'</span>';
     }
