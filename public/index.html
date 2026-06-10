@@ -449,6 +449,62 @@ function renderSODetail(){
   return out;
 }
 
+function renderClientCards(){
+  var list=getList();
+  var el=document.getElementById('clientCards');
+  if(!el)return;
+  if(!list.length){el.innerHTML='<div style="padding:20px;text-align:center;color:#94a3b8;">No clients found</div>';return;}
+  var html='';
+  list.forEach(function(c){
+    var pendingTasks=(c.tasks||[]).filter(function(t){return !t.done;});
+    var sc=SL[c.st]||SL.active;
+    html+='<div class="card" onclick="G.sel=\''+c.id+'\';G.view=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
+    html+='<div class="card-top"><div>';
+    html+='<div class="card-name">'+esc(c.name)+(c.isM?' <span style="font-size:11px;background:#fef9c3;color:#854d0e;padding:2px 6px;border-radius:4px;">'+SL[c.st]+'</span>':'')+'</div>';
+    html+='<div class="card-meta">'+(c.lastRealAppt?'<span>Last: '+fmtDate(c.lastRealAppt)+'</span>':'<span>No appointment</span>')+(c.end&&c.st!=='discharge'?'<span>Ends: '+fmtDate(c.end)+'</span>':'')+'</div></div>';
+    html+='<div class="card-right"><span class="badge" style="background:'+sc.bg+';color:'+sc.color+'">'+sc.label+'</span>';
+    if(c.end&&c.st==='active'){var dl=bizLeft(c.end);html+='<div class="card-days" style="color:'+(dl<=3?'#ca8a04':'#64748b')+'">'+dl+' days</div>';}
+    html+='</div></div>';
+    if(pendingTasks.length>0){
+      html+='<div class="card-tasks">';
+      pendingTasks.slice(0,2).forEach(function(tk){
+        html+='<div class="task-row"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a||'')+'</span><span style="flex:1;color:'+(tk.done?'#aaa':'#555')+';'+(tk.done?'text-decoration:line-through;':'')+'">'+esc(tk.n||tk.note||'')+'</span></div>';
+      });
+      if(pendingTasks.length>2)html+='<div style="font-size:11px;color:#888;">+'+(pendingTasks.length-2)+' more</div>';
+      html+='</div>';
+    }
+    html+='</div>';
+  });
+  el.innerHTML=html;
+}
+
+function renderStudentCards(){
+  var el=document.getElementById('studentCards');
+  if(!el)return;
+  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());}).sort(function(a,b){var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';return db>da?1:db<da?-1:0;});
+  if(!list.length){el.innerHTML='<div style="padding:20px;text-align:center;color:#94a3b8;">No students found</div>';return;}
+  var html='';
+  list.forEach(function(s){
+    var pending=(s.tasks||[]).filter(function(t){return !t.done;});
+    html+='<div class="card" onclick="G.studentSel=\''+s.id+'\';G.studentView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
+    html+='<div class="card-top"><div><div class="card-name">'+esc(s.name)+'</div>';
+    html+='<div class="card-meta"><span>'+s.appointments.length+' session'+(s.appointments.length!==1?'s':'')+'</span>';
+    if(s.appointments.length>0)html+='<span>Last: '+fmtDate(s.appointments[0].date)+'</span>';
+    html+='</div></div>';
+    html+='<div class="card-right"><span style="font-size:12px;color:#888;">'+pending.length+' task'+(pending.length!==1?'s':'')+' pending</span></div></div>';
+    if(pending.length>0){
+      html+='<div class="card-tasks">';
+      pending.slice(0,2).forEach(function(tk){
+        html+='<div class="task-row"><span class="task-tag tag-'+(tk.assignee==='Felicity'||tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee||tk.a||'')+'</span><span style="flex:1;color:#555">'+esc(tk.note||tk.n||'')+'</span></div>';
+      });
+      if(pending.length>2)html+='<div style="font-size:11px;color:#888;">+'+(pending.length-2)+' more</div>';
+      html+='</div>';
+    }
+    html+='</div>';
+  });
+  el.innerHTML=html;
+}
+
 function doRemoveClient(id){
   if(!confirm('Remove this client from the tracker?'))return;
   fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'clients'})});
@@ -473,7 +529,13 @@ function getList(){
     if(G.filt!=='all'&&c.st!==G.filt)return false;
     if(G.q&&!c.name.toLowerCase().includes(G.q.toLowerCase())&&!(c.practitioner||'').toLowerCase().includes(G.q.toLowerCase()))return false;
     return true;
-  }).sort(function(a,b){return order[a.st]-order[b.st];});
+  }).sort(function(a,b){
+    var so=order[a.st]-order[b.st];
+    if(so!==0)return so;
+    var da=a.lastRealAppt||a.end||'';
+    var db=b.lastRealAppt||b.end||'';
+    return db>da?1:db<da?-1:0;
+  });
 }
 
 function renderTabs(){
@@ -490,9 +552,9 @@ function renderStudentList(){
   var out=renderTabs();
   out+='<div class="hdr"><div><h1>Students</h1><p class="sub">'+G.students.length+' students</p></div><div class="hdr-right">'+(G.studentSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.studentSyncedAt)+'</div>':'')+sb+'</div></div>';
   if(!G.students.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students yet.</p>'+sb+'</div>';return out;}
-  out+='<div class="filters"><div class="srch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input value="'+esc(G.studentQ)+'" oninput="G.studentQ=this.value;render()" placeholder="Search students..." /></div></div>';
-  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());});
-  out+='<div class="cards">';
+  out+='<div class="filters"><div class="srch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input value="'+esc(G.studentQ)+'" id="studentSearch" oninput="G.studentQ=this.value;renderStudentCards()" placeholder="Search students..." /></div></div>';
+  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());}).sort(function(a,b){var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';return db>da?1:db<da?-1:0;});
+  out+='<div class="cards" id="studentCards">';
   for(var i=0;i<list.length;i++){
     var s=list[i];
     var pending=(s.tasks||[]).filter(function(t){return !t.done;});
@@ -582,7 +644,7 @@ function renderList(){
   }
   out+='</div>';
   out+='<div class="filters"><div class="srch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>';
-  out+='<input value="'+esc(G.q)+'" oninput="G.q=this.value;render()" placeholder="Search..."/></div>';
+  out+='<input value="'+esc(G.q)+'" id="clientSearch" oninput="G.q=this.value;renderClientCards()" placeholder="Search clients..."/></div>';
   var fs=['all','checkin','discharge','rebook','active'];
   for(var j=0;j<fs.length;j++){
     var f=fs[j];
@@ -590,7 +652,7 @@ function renderList(){
   }
   out+='</div>';
   if(list.length===0){out+='<div class="empty">No clients match.</div>';return out;}
-  out+='<div class="cards">';
+  out+='<div class="cards" id="clientCards">';
   for(var k=0;k<list.length;k++){
     var c=list[k];
     var left=bizLeft(c.end);
