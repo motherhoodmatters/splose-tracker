@@ -26,8 +26,11 @@ async function initDB(){
 }
 
 async function getCache(key){
-  const r=await pool.query('SELECT value FROM cache WHERE key=$1',[key]);
-  return r.rows.length?JSON.parse(r.rows[0].value):null;
+  const r=await pool.query('SELECT value,updated_at FROM cache WHERE key=$1',[key]);
+  if(!r.rows.length)return null;
+  var age=(Date.now()-new Date(r.rows[0].updated_at).getTime())/1000/60/60;
+  if(age>6)return null;
+  return JSON.parse(r.rows[0].value);
 }
 async function setCache(key,value){
   await pool.query('INSERT INTO cache(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2,updated_at=NOW()',[key,JSON.stringify(value)]);
