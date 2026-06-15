@@ -25,11 +25,13 @@ async function initDB(){
   console.log('DB ready');
 }
 
-async function getCache(key){
+async function getCache(key,noExpiry){
   const r=await pool.query('SELECT value,updated_at FROM cache WHERE key=$1',[key]);
   if(!r.rows.length)return null;
-  var age=(Date.now()-new Date(r.rows[0].updated_at).getTime())/1000/60/60;
-  if(age>6)return null;
+  if(!noExpiry){
+    var age=(Date.now()-new Date(r.rows[0].updated_at).getTime())/1000/60/60;
+    if(age>6)return null;
+  }
   return JSON.parse(r.rows[0].value);
 }
 async function setCache(key,value){
@@ -431,7 +433,7 @@ app.get('/api/student-onboarding',async function(req,res){
   try{
     const allTasks=await getOnboardingTasks();
     const removedSet=await getOnboardingRemoved();
-    const cached=await getCache('student-onboarding')||[];
+    const cached=await getCache('student-onboarding',true)||[];
     const students=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
     res.json({clients:students,syncedAt:new Date().toISOString()});
   }catch(err){res.status(500).json({error:err.message});}
@@ -456,7 +458,7 @@ app.post('/api/student-onboarding/add',async function(req,res){
       {id:'so11_'+id,a:'Annie',n:'Added to 2122',done:false}
     ];
     const newStudent={id:id,name:name,program:program||null,firstAppt:new Date().toISOString().split('T')[0],tasks:DEFAULT_TASKS};
-    const cached=await getCache('student-onboarding')||[];
+    const cached=await getCache('student-onboarding',true)||[];
     await setCache('student-onboarding',[...cached,newStudent]);
     res.json({ok:true,student:newStudent});
   }catch(err){res.status(500).json({error:err.message});}
@@ -468,7 +470,7 @@ app.post('/api/student-onboarding/complete',async function(req,res){
   try{
     // Remove from onboarding
     await addOnboardingRemoved(clientId);
-    const cached=await getCache('student-onboarding')||[];
+    const cached=await getCache('student-onboarding',true)||[];
     const student=cached.find(function(c){return c.id===clientId;});
     await setCache('student-onboarding',cached.filter(function(c){return c.id!==clientId;}));
     // Add to students list if not already there
