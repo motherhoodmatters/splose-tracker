@@ -129,14 +129,55 @@ function doStudentOnboardingSync(){
 }
 
 function doAddStudentOnboarding(){
-  var name=prompt('Student name:');
-  if(!name||!name.trim())return;
-  var program=confirm('Click OK for LEP, Cancel for Pathway 3')?'LEP':'Pathway 3';
-  fetch('/api/student-onboarding/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim(),program:program})})
+  G.soAddModal=true;G.soAddList=null;render();
+  fetch('/api/students-list').then(function(r){return r.json();}).then(function(d){
+    G.soAddList=d.students||[];render();
+  });
+}
+
+function doAddSOFromExisting(name){
+  var program=prompt('Enter program (LEP, Pathway 3, or leave blank):','');
+  fetch('/api/student-onboarding/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,program:program||null})})
     .then(function(r){return r.json();})
     .then(function(d){
-      if(d.ok){G.studentOnboarding.push(d.student);render();}
+      if(d.ok){G.studentOnboarding.push(d.student);G.soAddModal=false;render();}
     });
+}
+
+function doAddSONew(){
+  var name=document.getElementById('soNewName').value.trim();
+  if(!name)return;
+  var program=prompt('Enter program (LEP, Pathway 3, or leave blank):','');
+  fetch('/api/student-onboarding/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,program:program||null})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){G.studentOnboarding.push(d.student);G.soAddModal=false;render();}
+    });
+}
+
+function renderSOAddModal(){
+  if(!G.soAddModal)return '';
+  var html='<div style="position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this){G.soAddModal=false;render();}">';
+  html+='<div style="background:white;border-radius:16px;padding:24px;width:100%;max-width:420px;margin:20px;max-height:80vh;overflow-y:auto;">';
+  html+='<h2 style="font-size:18px;font-weight:700;margin-bottom:16px;">Add student to onboarding</h2>';
+  html+='<div style="margin-bottom:16px;"><label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px;">New student name</label>';
+  html+='<div style="display:flex;gap:8px;"><input id="soNewName" type="text" placeholder="Full name" style="flex:1;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;" />';
+  html+='<button class="pri" onclick="doAddSONew()">Add</button></div></div>';
+  html+='<div style="font-size:13px;font-weight:500;color:#64748b;margin:16px 0 8px;border-top:1px solid #f1f5f9;padding-top:16px;">Or select from existing students</div>';
+  if(G.soAddList===null){
+    html+='<div style="color:#94a3b8;font-size:13px;">Loading students...</div>';
+  } else if(!G.soAddList.length){
+    html+='<div style="color:#94a3b8;font-size:13px;">No existing students found.</div>';
+  } else {
+    html+='<div style="display:flex;flex-direction:column;gap:4px;max-height:240px;overflow-y:auto;">';
+    G.soAddList.forEach(function(s){
+      html+='<button onclick="doAddSOFromExisting(\''+esc(s.name).replace(/'/g,"\\'")+'\')" style="text-align:left;padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;">'+esc(s.name)+'</button>';
+    });
+    html+='</div>';
+  }
+  html+='<button onclick="G.soAddModal=false;render()" style="margin-top:16px;width:100%;padding:9px;background:none;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit;">Cancel</button>';
+  html+='</div></div>';
+  return html;
 }
 
 function doCompleteStudentOnboarding(id){
@@ -378,7 +419,7 @@ function doRemoveStudentOnboarding(id){
   doCompleteStudentOnboarding(id);
 }
 function renderSOList(){
-  var out=renderTabs();
+  var out=renderTabs()+renderSOAddModal();
   out+='<div class="hdr"><div><h1>Student Onboarding</h1><p class="sub">'+G.studentOnboarding.length+' student'+(G.studentOnboarding.length!==1?'s':'')+'</p></div>';
   out+='<div class="hdr-right"><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div></div>';
   if(!G.studentOnboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students to onboard.</p><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div>';return out;}

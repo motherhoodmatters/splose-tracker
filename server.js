@@ -171,16 +171,6 @@ app.get('/api/clients',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
-app.get('/api/clearcache',async function(req,res){
-  try{
-    await pool.query("DELETE FROM cache WHERE key='clients'");
-    await pool.query("DELETE FROM cache WHERE key='students'");
-    await pool.query("DELETE FROM cache WHERE key='onboarding'");
-    await pool.query("DELETE FROM cache WHERE key='student-onboarding'");
-    res.json({ok:true,message:'Cache cleared - next sync will fetch fresh data'});
-  }catch(err){res.status(500).json({error:err.message});}
-});
-
 app.get('/api/clearremoved',async function(req,res){
   await pool.query('DELETE FROM removed');
   await setCache('clients',null);
@@ -436,6 +426,13 @@ app.get('/api/student-onboarding',async function(req,res){
     const cached=await getCache('student-onboarding',true)||[];
     const students=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
     res.json({clients:students,syncedAt:new Date().toISOString()});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
+app.get('/api/students-list',async function(req,res){
+  try{
+    const cached=await getCache('students')||[];
+    res.json({students:cached.map(function(s){return {id:s.id,name:s.name};})});
   }catch(err){res.status(500).json({error:err.message});}
 });
 
