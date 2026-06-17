@@ -226,6 +226,12 @@ app.post('/api/status',async function(req,res){
       const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{manualStatus:status}):c;});
       await setCache('clients',updated);
     }
+    const cachedStudents=await getCache('students');
+    if(cachedStudents){
+      var programs=(status&&status.indexOf('programs_')===0)?status.slice(9).split(',').filter(Boolean):[];
+      const updatedStudents=cachedStudents.map(function(c){return c.id===clientId?Object.assign({},c,{programs:programs}):c;});
+      await setCache('students',updatedStudents);
+    }
   }
   res.json({ok:true});
 });
@@ -249,12 +255,18 @@ app.get('/api/students',async function(req,res){
   const fullSync=req.query.full==='true';
   try{
     const allTasks=await getTasks();
+    const allStatuses=await getStatuses();
+    function programsFor(id){
+      var s=allStatuses[id];
+      if(s&&s.indexOf('programs_')===0)return s.slice(9).split(',').filter(Boolean);
+      return [];
+    }
     if(!fullSync){
       const cached=await getCache('students');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' students from cache');
         const removedStudents=await getStudentRemoved();
-        const students=cached.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+        const students=cached.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id)});});
         return res.json({students:students,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -295,7 +307,8 @@ app.get('/api/students',async function(req,res){
         name:name,
         practitioner:pnames[p.practitionerId]||'',
         appointments:interactions.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===399669};}),
-        tasks:allTasks[String(p.id)]||[]
+        tasks:allTasks[String(p.id)]||[],
+        programs:programsFor(String(p.id))
       });
     }
     await setCache('students',students);
