@@ -344,6 +344,9 @@ app.get('/api/onboarding',async function(req,res){
       const firstAppt=sorted[0];
       if(!firstAppt||firstAppt.start<'2026-06-04')continue;
       if(onboardingRemovedSet.has(String(p.id)))continue;
+      const STUDENT_SERVICE_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283,444486]);
+      const isStudent=sorted.some(function(a){return STUDENT_SERVICE_IDS.has(Number(a.serviceId));});
+      if(isStudent)continue;
       const existingTasks=allTasks[String(p.id)];
       const tasks=existingTasks||DT.map(function(t){return Object.assign({},t,{id:t.id+'_'+p.id});});
       clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',firstAppt:firstAppt.start.split('T')[0],tasks:tasks});
