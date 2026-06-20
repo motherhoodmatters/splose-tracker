@@ -21,6 +21,7 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS removed_students(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS removed_onboarding(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS followup_overrides(client_id TEXT PRIMARY KEY,days INTEGER,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   
   console.log('DB ready');
 }
@@ -94,6 +95,29 @@ async function setStatus(clientId,status){
   }
 }
 
+async function getFollowupOverrides(){
+  const r=await pool.query('SELECT client_id,days FROM followup_overrides');
+  const out={};
+  r.rows.forEach(function(row){out[row.client_id]=row.days;});
+  return out;
+}
+async function setFollowupOverride(clientId,days){
+  if(days===null||days===undefined){
+    await pool.query('DELETE FROM followup_overrides WHERE client_id=$1',[clientId]);
+  }else{
+    await pool.query('INSERT INTO followup_overrides(client_id,days,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET days=$2,updated_at=NOW()',[clientId,days]);
+  }
+}
+
+app.post('/api/followup-override',async function(req,res){
+  const{clientId,days}=req.body;
+  if(!clientId)return res.status(400).json({error:'clientId required'});
+  try{
+    await setFollowupOverride(clientId,days===''||days===null||days===undefined?null:Number(days));
+    res.json({ok:true});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
 function wait(ms){return new Promise(r=>setTimeout(r,ms));}
 async function allPages(ep,params){
   params=params||{};
@@ -119,12 +143,12 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();
+    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();const allOverrides=await getFollowupOverrides();
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' clients from DB cache');
-        const clients=cached.filter(function(c){return !removedMap[c.id];}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null});});
+        const clients=cached.filter(function(c){return !removedMap[c.id];}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -163,7 +187,7 @@ app.get('/api/clients',async function(req,res){
       }
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
-      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null});
+      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null});
     }
     const finalClients=clients.filter(function(c){return !removedMap[c.id];});await setCache('clients',finalClients);
     console.log('DONE! '+finalClients.length+' clients');

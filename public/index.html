@@ -105,9 +105,9 @@ function bizLeft(e){if(!e)return 10;var now=new Date();now.setHours(0,0,0,0);var
 function fmtDate(s){if(!s)return '-';return new Date(s+'T00:00:00').toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});}
 function ago(iso){var m=Math.round((Date.now()-new Date(iso))/60000);if(m<1)return 'just now';if(m<60)return m+' min ago';return Math.round(m/60)+' hr ago';}
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function autoSt(c){if(!c.lastRealAppt)return 'rebook';var e=addBiz(c.lastRealAppt,10);var l=bizLeft(e);if(l<0)return 'discharge';if(l<=3)return 'checkin';return 'active';}
+function autoSt(c){if(!c.lastRealAppt)return 'rebook';var days=c.followupDays||10;var e=addBiz(c.lastRealAppt,days);var l=bizLeft(e);if(l<0)return 'discharge';if(l<=3)return 'checkin';return 'active';}
 function getSt(c){return G.manual[c.id]||c.manualStatus||autoSt(c);}
-function getEnd(c){if(!c.lastRealAppt)return null;return addBiz(c.lastRealAppt,10);}
+function getEnd(c){if(!c.lastRealAppt)return null;return addBiz(c.lastRealAppt,c.followupDays||10);}
 var SL={active:'Active',checkin:'Check-in needed',discharge:'Discharge',rebook:'Rebook needed'};
 var SBC={active:'b-active',checkin:'b-checkin',discharge:'b-discharge',rebook:'b-rebook'};
 var SC={active:'#2d7a3a',checkin:'#b85e00',discharge:'#b32020',rebook:'#5b21b6'};
@@ -564,6 +564,15 @@ function doRemoveClient(id){
   G.view='list';render();
 }
 
+function doSetFollowupDays(id,current){
+  var input=prompt('Set follow-up window in business days for this client (default is 10):',current);
+  if(input===null)return;
+  var days=input.trim()===''?null:Number(input);
+  if(input.trim()!==''&&(isNaN(days)||days<1)){alert('Please enter a valid number of days');return;}
+  G.clients=G.clients.map(function(c){if(c.id!==id)return c;var updated=Object.assign({},c,{followupDays:days});updated.end=getEnd(updated);updated.st=getSt(updated);return updated;});
+  fetch('/api/followup-override',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,days:days})});
+  render();
+}
 function doManualStatus(id,s){G.clients=G.clients.map(function(c){return c.id===id?Object.assign({},c,{manualStatus:s,st:s||autoSt(c)}):c;});fetch('/api/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,status:s})});render();}
 
 function counts(){
@@ -762,9 +771,10 @@ function renderDetail(){
   out+='</div><span class="badge '+SBC[c.st]+'">'+SL[c.st]+(isM?' (manual)':'')+'</span></div>';
   out+='<div class="mini-grid">';
   out+='<div class="mini"><p>Last appointment</p><p>'+fmtDate(c.lastRealAppt)+'</p></div>';
-  out+='<div class="mini"><p>Support ends</p><p>'+(c.end?fmtDate(c.end):'-')+'</p></div>';
+  out+='<div class="mini"><p>Support ends</p><p>'+(c.end?fmtDate(c.end):'-')+(c.followupDays?' <span style="font-size:11px;color:#0d9488;">('+c.followupDays+'d)</span>':'')+'</p></div>';
   out+='<div class="mini"><p>Contacts</p><p>'+realAppts.length+' appts, '+(appts.length-realAppts.length)+' calls</p></div>';
   out+='</div>';
+  out+='<div style="margin:8px 0 4px"><button onclick="doSetFollowupDays(\''+c.id+'\','+(c.followupDays||10)+')" style="padding:5px 12px;border-radius:6px;border:1px solid #e2e8f0;background:white;color:#64748b;font-size:12px;cursor:pointer;font-family:inherit;">Adjust follow-up window ('+(c.followupDays||10)+' days)</button></div>';
   if(c.end){
     out+='<div class="prog-row"><span>Follow-up period</span>';
     out+='<span style="color:'+SC[c.st]+';font-weight:600">';
