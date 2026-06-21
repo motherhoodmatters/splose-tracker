@@ -146,6 +146,15 @@ async function allPages(ep,params){
   return results;
 }
 
+const syncLocks={clients:false,students:false,onboarding:false};
+async function waitForLock(key){
+  let waited=0;
+  while(syncLocks[key]&&waited<120000){
+    await wait(1000);
+    waited+=1000;
+  }
+}
+
 app.use(express.static(path.join(__dirname,'public')));
 
 app.get('/api/clients',async function(req,res){
@@ -161,6 +170,16 @@ app.get('/api/clients',async function(req,res){
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
+    if(syncLocks.clients){
+      console.log('Clients sync already in progress - waiting...');
+      await waitForLock('clients');
+      const justFinished=await getCache('clients');
+      if(justFinished&&justFinished.length>0){
+        const out=justFinished.filter(function(c){return !removedMap[c.id];}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
+        return res.json({clients:out,syncedAt:new Date().toISOString(),fromCache:true});
+      }
+    }
+    syncLocks.clients=true;
     console.log('Full sync starting...');
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
@@ -213,8 +232,9 @@ app.get('/api/clients',async function(req,res){
     }
     const finalClients=clients.filter(function(c){return !removedMap[c.id];});await setCache('clients',finalClients);
     console.log('DONE! '+finalClients.length+' clients');
+    syncLocks.clients=false;
     res.json({clients:finalClients,syncedAt:new Date().toISOString()});
-  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+  }catch(err){syncLocks.clients=false;console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
 app.get('/api/clearremoved',async function(req,res){
@@ -320,6 +340,17 @@ app.get('/api/students',async function(req,res){
     const studentRemovedRows=await pool.query('SELECT client_id,removed_at FROM removed_students');
     const studentRemovedMap={};
     studentRemovedRows.rows.forEach(function(r){studentRemovedMap[r.client_id]=r.removed_at;});
+    if(syncLocks.students){
+      console.log('Students sync already in progress - waiting...');
+      await waitForLock('students');
+      const justFinished=await getCache('students');
+      if(justFinished&&justFinished.length>0){
+        const removedStudents=await getStudentRemoved();
+        const out=justFinished.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id)});});
+        return res.json({students:out,syncedAt:new Date().toISOString(),fromCache:true});
+      }
+    }
+    syncLocks.students=true;
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
     pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
@@ -367,8 +398,9 @@ app.get('/api/students',async function(req,res){
     }
     await setCache('students',students);
     console.log('DONE! '+students.length+' students');
+    syncLocks.students=false;
     res.json({students:students,syncedAt:new Date().toISOString()});
-  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+  }catch(err){syncLocks.students=false;console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
 
@@ -382,6 +414,16 @@ app.get('/api/onboarding',async function(req,res){
       const clients=cached.filter(function(c){return !onboardingRemovedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
       return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
     }
+    if(syncLocks.onboarding){
+      console.log('Onboarding sync already in progress - waiting...');
+      await waitForLock('onboarding');
+      const justFinished=await getCache('onboarding');
+      if(justFinished){
+        const out=justFinished.filter(function(c){return !onboardingRemovedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
+        return res.json({clients:out,syncedAt:new Date().toISOString(),fromCache:true});
+      }
+    }
+    syncLocks.onboarding=true;
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
     pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
@@ -415,8 +457,9 @@ app.get('/api/onboarding',async function(req,res){
     }
     await setCache('onboarding',clients);
     console.log('DONE onboarding: '+clients.length+' clients');
+    syncLocks.onboarding=false;
     res.json({clients:clients,syncedAt:new Date().toISOString()});
-  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+  }catch(err){syncLocks.onboarding=false;console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
 
