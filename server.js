@@ -124,9 +124,18 @@ async function allPages(ep,params){
   const results=[];
   const qs=new URLSearchParams(params).toString();
   let url=BASE+ep+(qs?'?'+qs:'');
+  let retries=0;
   while(url){
     const res=await fetch(url,{headers:HEADERS});
-    if(res.status===429){console.log('Rate limited...');await wait(3000);continue;}
+    if(res.status===429){
+      retries++;
+      if(retries>8){throw new Error('Splose rate limit - giving up after 8 retries');}
+      const backoff=3000*retries;
+      console.log('Rate limited... retry '+retries+'/8, waiting '+backoff+'ms');
+      await wait(backoff);
+      continue;
+    }
+    retries=0;
     if(res.status>=400){throw new Error('Splose '+res.status);}
     const body=await res.json();
     results.push.apply(results,body.data||[]);
@@ -163,8 +172,16 @@ app.get('/api/clients',async function(req,res){
       const p=patients[i];
       const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
       console.log('Patient '+(i+1)+'/'+patients.length+': '+name);
-      const appts=await allPages('/appointments',{patientId:p.id});
-      await wait(500);
+      var appts;
+      try{
+        appts=await allPages('/appointments',{patientId:p.id});
+      }catch(syncErr){
+        console.log('  sync interrupted at patient '+(i+1)+'/'+patients.length+' - saving '+clients.length+' clients found so far');
+        const partial=clients.filter(function(c){return !removedMap[c.id];});
+        if(partial.length>0)await setCache('clients',partial);
+        throw syncErr;
+      }
+      await wait(700);
       const realAppts=appts.filter(function(a){return a.start&&Number(a.serviceId)!==CHECKIN_ID;});
       const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
       if(!hasRecent){console.log('  skipping');continue;}
@@ -188,6 +205,11 @@ app.get('/api/clients',async function(req,res){
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
       clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null});
+      if((i+1)%50===0){
+        const progress=clients.filter(function(c){return !removedMap[c.id];});
+        await setCache('clients',progress);
+        console.log('  progress saved: '+progress.length+' clients so far');
+      }
     }
     const finalClients=clients.filter(function(c){return !removedMap[c.id];});await setCache('clients',finalClients);
     console.log('DONE! '+finalClients.length+' clients');
@@ -309,8 +331,16 @@ app.get('/api/students',async function(req,res){
     for(var i=0;i<patients.length;i++){
       const p=patients[i];
       const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
-      const appts=await allPages('/appointments',{patientId:p.id});
-      await wait(500);
+      var appts;
+      try{
+        appts=await allPages('/appointments',{patientId:p.id});
+      }catch(syncErr){
+        console.log('  student sync interrupted at '+(i+1)+'/'+patients.length+' - saving '+students.length+' found so far');
+        if(students.length>0)await setCache('students',students);
+        throw syncErr;
+      }
+      await wait(700);
+      if((i+1)%50===0){await setCache('students',students);console.log('  progress saved: '+students.length+' students so far');}
       const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
       if(!mentoringAppts.length)continue;
       const studentRemovedAt=studentRemovedMap?studentRemovedMap[String(p.id)]:null;
@@ -361,8 +391,16 @@ app.get('/api/onboarding',async function(req,res){
     for(var i=0;i<patients.length;i++){
       const p=patients[i];
       const name=((p.firstname||'')+ ' '+(p.lastname||'')).trim()||'Patient '+p.id;
-      const appts=await allPages('/appointments',{patientId:p.id});
-      await wait(500);
+      var appts;
+      try{
+        appts=await allPages('/appointments',{patientId:p.id});
+      }catch(syncErr){
+        console.log('  onboarding sync interrupted at '+(i+1)+'/'+patients.length+' - saving '+clients.length+' found so far');
+        if(clients.length>0)await setCache('onboarding',clients);
+        throw syncErr;
+      }
+      await wait(700);
+      if((i+1)%50===0){await setCache('onboarding',clients);console.log('  progress saved: '+clients.length+' so far');}
       if(!appts.length)continue;
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(a.start)-new Date(b.start);});
       const firstAppt=sorted[0];
