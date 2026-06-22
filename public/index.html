@@ -328,7 +328,12 @@ async function doEditTask(cid,tid,newNote,listType){
   var list=listType==='onboarding'?G.onboarding:listType==='studentOnboarding'?G.studentOnboarding:listType==='students'?G.students:G.clients;
   var c=list.find(function(x){return x.id===cid;});if(!c)return;
   var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{n:newNote}):t;});
-  await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  if(listType==='students'){
+    await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+    G.students=G.students.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
+  } else {
+    await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
+  }
   if(listType==='onboarding'||listType==='studentOnboarding'){await fetch('/api/onboarding-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});if(listType==='studentOnboarding'){G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});}else{G.onboarding=G.onboarding.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});}}
   else if(listType==='students')G.students=G.students.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
   else G.clients=G.clients.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
