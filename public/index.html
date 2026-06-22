@@ -399,9 +399,11 @@ function renderOnboardingDetail(){
 function doSetProgram(id,program){
   var cur=G.studentOnboarding.find(function(x){return x.id===id;});
   if(!cur)return;
-  var newProg=cur.program===program?null:program;
-  G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===id?Object.assign({},x,{program:newProg}):x;});
-  fetch('/api/student-onboarding/program',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,program:newProg})});
+  var progs=cur.programs?cur.programs.slice():(cur.program?[cur.program]:[]);
+  var idx=progs.indexOf(program);
+  if(idx>=0){progs.splice(idx,1);}else{progs.push(program);}
+  G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===id?Object.assign({},x,{programs:progs,program:progs[0]||null}):x;});
+  fetch('/api/student-onboarding/program',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,program:progs.join(',')})});
   render();
 }
 async function doToggleSOTask(cid,tid){
@@ -442,7 +444,8 @@ function renderSOList(){
     var pending=tasks.filter(function(t){return !t.done;});
     out+='<div class="card" onclick="G.soSel=\''+c.id+'\';G.soView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
     out+='<div class="card-top"><div><div class="card-name">'+esc(c.name)+'</div>';
-    out+='<div class="card-meta"><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:'+(c.program==='LEP'?'#ede9fe':c.program==='Pathway 3'?'#fce7f3':'#f1f5f9')+';color:'+(c.program==='LEP'?'#5b21b6':c.program==='Pathway 3'?'#9d174d':'#94a3b8')+'">'+(c.program||'No program set')+'</span></div></div>';
+    var soProgs=c.programs?c.programs:(c.program?[c.program]:[]);
+    out+='<div style="margin:2px 0 3px">'+(soProgs.length?renderProgBadges(soProgs):'<span style="font-size:11px;color:#94a3b8;">No program set</span>')+'</div></div>';
     out+='<div class="card-right"><span style="font-size:13px;font-weight:600;color:'+(pct===100?'#2d7a3a':'#1a1a1a')+'">'+done+'/'+total+' done</span>';
     out+='<div style="width:80px;height:4px;background:#eee;border-radius:2px;margin-top:4px"><div style="width:'+pct+'%;height:100%;background:'+(pct===100?'#2d7a3a':'#1a1a1a')+';border-radius:2px"></div></div>';
     out+='</div></div>';
@@ -470,10 +473,12 @@ function renderSODetail(){
   out+='<button class="danger" onclick="doRemoveStudentOnboarding(\''+c.id+'\')">Onboarding complete</button>';
   out+='</div>';
   out+='<div class="det-box"><h2 style="font-size:18px;font-weight:600;margin-bottom:8px">'+esc(c.name)+'</h2>';
-  out+='<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  out+='<button onclick="doSetProgram(\''+c.id+'\',\'LEP\')" style="padding:6px 16px;border-radius:6px;border:2px solid '+(c.program==='LEP'?'#5b21b6':'#e2e8f0')+';background:'+(c.program==='LEP'?'#ede9fe':'white')+';color:'+(c.program==='LEP'?'#5b21b6':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;">LEP</button>';
-  out+='<button onclick="doSetProgram(\''+c.id+'\',\'Pathway 3\')" style="padding:6px 16px;border-radius:6px;border:2px solid '+(c.program==='Pathway 3'?'#9d174d':'#e2e8f0')+';background:'+(c.program==='Pathway 3'?'#fce7f3':'white')+';color:'+(c.program==='Pathway 3'?'#9d174d':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;">Pathway 3</button>';
-  out+='</div>';
+  out+='<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
+  var soProgs=c.programs?c.programs:(c.program?[c.program]:[]);
+  out+='<button onclick="doSetProgram(\''+c.id+'\',\'LEP\')" style="padding:5px 14px;border-radius:6px;border:2px solid '+(soProgs.indexOf('LEP')>=0?'#5b21b6':'#e2e8f0')+';background:'+(soProgs.indexOf('LEP')>=0?'#ede9fe':'white')+';color:'+(soProgs.indexOf('LEP')>=0?'#5b21b6':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;">LEP</button>';
+  out+='<button onclick="doSetProgram(\''+c.id+'\',\'Pathway 3\')" style="padding:5px 14px;border-radius:6px;border:2px solid '+(soProgs.indexOf('Pathway 3')>=0?'#9d174d':'#e2e8f0')+';background:'+(soProgs.indexOf('Pathway 3')>=0?'#fce7f3':'white')+';color:'+(soProgs.indexOf('Pathway 3')>=0?'#9d174d':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;">Pathway 3</button>';
+  out+='<button onclick="doSetProgram(\''+c.id+'\',\'Hold\')" style="padding:5px 14px;border-radius:6px;border:2px solid '+(soProgs.indexOf('Hold')>=0?'#92400e':'#e2e8f0')+';background:'+(soProgs.indexOf('Hold')>=0?'#fef3c7':'white')+';color:'+(soProgs.indexOf('Hold')>=0?'#92400e':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;">Hold</button>';
+  out+='</div</div>';
   out+='<div class="mini-grid"><div class="mini"><p>First appointment</p><p>'+fmtDate(c.firstAppt)+'</p></div>';
   out+='<div class="mini"><p>Progress</p><p>'+done+' of '+tasks.length+' done</p></div>';
   out+='<div class="mini"><p>Program</p><p>'+(c.program||'Not set')+'</p></div></div></div>';
@@ -530,16 +535,38 @@ function renderClientCards(){
   el.innerHTML=html;
 }
 
+function renderProgBadges(progs){
+  var colors={
+    'LEP':{bg:'#ede9fe',color:'#5b21b6'},
+    'Pathway 3':{bg:'#fce7f3',color:'#9d174d'},
+    'Prospective':{bg:'#e0f2fe',color:'#0369a1'},
+    'Hold':{bg:'#fef3c7',color:'#92400e'}
+  };
+  if(!progs||!progs.length)return '';
+  return progs.map(function(p){
+    var c=colors[p]||{bg:'#f1f5f9',color:'#475569'};
+    return '<span style="padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;background:'+c.bg+';color:'+c.color+';margin-right:3px;">'+p+'</span>';
+  }).join('');
+}
 function renderStudentCards(){
   var el=document.getElementById('studentCards');
   if(!el)return;
-  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());}).sort(function(a,b){var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';return db>da?1:db<da?-1:0;});
+  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());}).sort(function(a,b){
+  var aHold=a.programs&&a.programs.indexOf('Hold')>=0;
+  var bHold=b.programs&&b.programs.indexOf('Hold')>=0;
+  if(aHold&&!bHold)return 1;
+  if(!aHold&&bHold)return -1;
+  var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';
+  var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';
+  return db>da?1:db<da?-1:0;
+});
   if(!list.length){el.innerHTML='<div style="padding:20px;text-align:center;color:#94a3b8;">No students found</div>';return;}
   var html='';
   list.forEach(function(s){
     var pending=(s.tasks||[]).filter(function(t){return !t.done;});
     html+='<div class="card" onclick="G.studentSel=\''+s.id+'\';G.studentView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
     html+='<div class="card-top"><div><div class="card-name">'+esc(s.name)+'</div>';
+    if(s.programs&&s.programs.length)html+='<div style="margin:2px 0 3px">'+renderProgBadges(s.programs)+'</div>';
     html+='<div class="card-meta"><span>'+s.appointments.length+' session'+(s.appointments.length!==1?'s':'')+'</span>';
     if(s.appointments.length>0)html+='<span>Last: '+fmtDate(s.appointments[0].date)+'</span>';
     html+='</div></div>';
@@ -614,13 +641,22 @@ function renderStudentList(){
   out+='<div class="hdr"><div><h1>Students</h1><p class="sub">'+G.students.length+' students</p></div><div class="hdr-right">'+(G.studentSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.studentSyncedAt)+'</div>':'')+sb+'</div></div>';
   if(!G.students.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students yet.</p>'+sb+'</div>';return out;}
   out+='<div class="filters"><div class="srch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input value="'+esc(G.studentQ)+'" id="studentSearch" oninput="G.studentQ=this.value;renderStudentCards()" placeholder="Search students..." /></div></div>';
-  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());}).sort(function(a,b){var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';return db>da?1:db<da?-1:0;});
+  var list=G.students.filter(function(s){return !G.studentQ||s.name.toLowerCase().includes(G.studentQ.toLowerCase());}).sort(function(a,b){
+  var aHold=a.programs&&a.programs.indexOf('Hold')>=0;
+  var bHold=b.programs&&b.programs.indexOf('Hold')>=0;
+  if(aHold&&!bHold)return 1;
+  if(!aHold&&bHold)return -1;
+  var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';
+  var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';
+  return db>da?1:db<da?-1:0;
+});
   out+='<div class="cards" id="studentCards">';
   for(var i=0;i<list.length;i++){
     var s=list[i];
     var pending=(s.tasks||[]).filter(function(t){return !t.done;});
     out+='<div class="card" onclick="G.studentSel=\''+s.id+'\';G.studentView=\'detail\';G.newTask={a:\'\',n:\'\'};render()">';
     out+='<div class="card-top"><div><div class="card-name">'+esc(s.name)+'</div>';
+    if(s.programs&&s.programs.length)out+='<div style="margin:2px 0 3px">'+renderProgBadges(s.programs)+'</div>';
     out+='<div class="card-meta"><span>'+s.appointments.length+' session'+(s.appointments.length!==1?'s':'')+'</span>';
     if(s.appointments.length>0)out+='<span>Last: '+fmtDate(s.appointments[0].date)+'</span>';
     out+='</div></div>';
@@ -654,6 +690,7 @@ function renderStudentDetail(){
   out+='<button onclick="doSetStudentProgram(\''+s.id+'\',\'LEP\')" style="padding:5px 14px;border-radius:6px;border:2px solid '+(progs.indexOf('LEP')>=0?'#5b21b6':'#e2e8f0')+';background:'+(progs.indexOf('LEP')>=0?'#ede9fe':'white')+';color:'+(progs.indexOf('LEP')>=0?'#5b21b6':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;">LEP</button>';
   out+='<button onclick="doSetStudentProgram(\''+s.id+'\',\'Pathway 3\')" style="padding:5px 14px;border-radius:6px;border:2px solid '+(progs.indexOf('Pathway 3')>=0?'#9d174d':'#e2e8f0')+';background:'+(progs.indexOf('Pathway 3')>=0?'#fce7f3':'white')+';color:'+(progs.indexOf('Pathway 3')>=0?'#9d174d':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;">Pathway 3</button>';
   out+='<button onclick="doSetStudentProgram(\''+s.id+'\',\'Prospective\')" style="padding:5px 14px;border-radius:6px;border:2px solid '+(progs.indexOf('Prospective')>=0?'#0369a1':'#e2e8f0')+';background:'+(progs.indexOf('Prospective')>=0?'#e0f2fe':'white')+';color:'+(progs.indexOf('Prospective')>=0?'#0369a1':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;">Prospective</button>';
+  out+='<button onclick="doSetStudentProgram(\''+s.id+'\',\'Hold\') style="padding:5px 14px;border-radius:6px;border:2px solid '+(progs.indexOf('Hold')>=0?'#92400e':'#e2e8f0')+';background:'+(progs.indexOf('Hold')>=0?'#fef3c7':'white')+';color:'+(progs.indexOf('Hold')>=0?'#92400e':'#64748b')+';font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;">Hold</button>';
   out+='<button onclick="doMoveStudentToOnboarding(\''+s.id+'\',\''+esc(s.name).replace(/'/g,"\\\\'")+'\')" style="padding:6px 16px;border-radius:6px;border:2px solid #0d9488;background:white;color:#0d9488;font-weight:600;cursor:pointer;font-family:inherit;margin-left:8px;">Move to Onboarding</button>';
   out+='</div>';
   out+='<div class="mini-grid">';
