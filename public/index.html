@@ -327,7 +327,7 @@ async function doSaveOnboardingTask(){
 async function doEditTask(cid,tid,newNote,listType){
   var list=listType==='onboarding'?G.onboarding:listType==='studentOnboarding'?G.studentOnboarding:listType==='students'?G.students:G.clients;
   var c=list.find(function(x){return x.id===cid;});if(!c)return;
-  var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{n:newNote}):t;});
+  var tasks=(c.tasks||[]).map(function(t){return t.id===tid?Object.assign({},t,{n:newNote,note:newNote}):t;});
   if(listType==='students'){
     await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:cid,tasks:tasks})});
     G.students=G.students.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
