@@ -463,6 +463,20 @@ app.get('/api/onboarding',async function(req,res){
 });
 
 
+app.post('/api/onboarding/add',async function(req,res){
+  const{name}=req.body;
+  if(!name)return res.status(400).json({error:'Name required'});
+  try{
+    const id='ob_'+require('crypto').randomBytes(8).toString('hex');
+    const DT=[{id:'ob1',assignee:'Annie',n:'Contact card sent to Felicity',done:false},{id:'ob2',assignee:'Annie',n:'Registration',done:false},{id:'ob3',assignee:'Annie',n:'Consent',done:false},{id:'ob4',assignee:'Annie',n:'Safety Checklist if Home',done:false},{id:'ob5',assignee:'Annie',n:'Address to consult if home',done:false},{id:'ob6',assignee:'Annie',n:'DOB and Medicare (if applicable) added',done:false},{id:'ob7',assignee:'Annie',n:'Joined Circle',done:false},{id:'ob8',assignee:'Annie',n:'Circle chat opened and welcome message sent',done:false}];
+    const tasks=DT.map(function(t){return Object.assign({},t,{id:t.id+'_'+id});});
+    const newClient={id:id,name:name,firstAppt:new Date().toISOString().split('T')[0],tasks:tasks,manual:true};
+    const cached=await getCache('onboarding',true)||[];
+    await setCache('onboarding',[...cached,newClient]);
+    res.json({ok:true,client:newClient});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
 // Get chat link for a client
 app.get('/api/chat-link/:clientId',async function(req,res){
   const token=await getOrCreateToken(req.params.clientId);

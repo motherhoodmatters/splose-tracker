@@ -97,7 +97,7 @@ h3.sec{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 var G = {
   clients: [], removed: [], manual: {}, newTask: {a:'', n:''},
   syncing: false, error: null, view: 'list', sel: null, filt: 'all', q: '', syncedAt: null,
-  tab: 'clients', students: [], studentSyncedAt: null, studentSyncing: false, studentView: 'list', studentSel: null, studentQ: '', onboarding: [], onboardingSyncedAt: null, onboardingSyncing: false, onboardingView: 'list', onboardingSel: null, editingTask: null, studentOnboarding: [], soSyncedAt: null, soSyncing: false, soView: 'list', soSel: null
+  tab: 'clients', students: [], studentSyncedAt: null, studentSyncing: false, studentView: 'list', studentSel: null, studentQ: '', onboarding: [], onboardingSyncedAt: null, onboardingSyncing: false, onboardingView: 'list', onboardingSel: null, editingTask: null, studentOnboarding: [], soSyncedAt: null, soSyncing: false, soView: 'list', soSel: null, obAddModal: false
 };
 
 function addBiz(s,n){var d=new Date(s+'T00:00:00');var c=0;while(c<n){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)c++;}return d.toISOString().split('T')[0];}
@@ -339,10 +339,34 @@ async function doEditTask(cid,tid,newNote,listType){
   else G.clients=G.clients.map(function(x){return x.id===cid?Object.assign({},x,{tasks:tasks}):x;});
   G.editingTask=null;render();
 }
+function doAddOnboardingManual(){
+  G.obAddModal=true;render();
+}
+function doAddOnboardingSubmit(){
+  var name=document.getElementById('obNewName').value.trim();
+  if(!name)return;
+  fetch('/api/onboarding/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){G.onboarding.push(d.client);G.obAddModal=false;render();}
+    });
+}
+function renderObAddModal(){
+  if(!G.obAddModal)return '';
+  return '<div style="position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this){G.obAddModal=false;render();}">'
+    +'<div style="background:white;border-radius:16px;padding:24px;width:100%;max-width:400px;margin:20px;">'
+    +'<h2 style="font-size:18px;font-weight:700;margin-bottom:16px;">Add client to onboarding</h2>'
+    +'<div style="margin-bottom:16px;"><label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px;">Client name</label>'
+    +'<input id="obNewName" type="text" placeholder="Full name" style="width:100%;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;" /></div>'
+    +'<div style="display:flex;gap:10px;">'
+    +'<button onclick="G.obAddModal=false;render()" style="flex:1;padding:10px;background:none;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit;">Cancel</button>'
+    +'<button onclick="doAddOnboardingSubmit()" class="pri" style="flex:1;justify-content:center;">Add client</button>'
+    +'</div></div></div>';
+}
 function renderOnboardingList(){
   var sb='<button class="pri" onclick="doOnboardingSync()" '+(G.onboardingSyncing?'disabled':'')+'>'+(G.onboardingSyncing?'Syncing...':'Sync Onboarding')+'</button>';
-  var out=renderTabs();
-  out+='<div class="hdr"><div><h1>Onboarding</h1><p class="sub">'+G.onboarding.length+' new clients</p></div><div class="hdr-right">'+(G.onboardingSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.onboardingSyncedAt)+'</div>':'')+sb+'</div></div>';
+  var out=renderTabs()+renderObAddModal();
+  out+='<div class="hdr"><div><h1>Onboarding</h1><p class="sub">'+G.onboarding.length+' new clients</p></div><div class="hdr-right">'+(G.onboardingSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.onboardingSyncedAt)+'</div>':'')+sb+'<button class="pri" onclick="doAddOnboardingManual()" style="margin-left:8px;">+ Add manually</button></div></div>';
   if(!G.onboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No new clients to onboard.</p>'+sb+'</div>';return out;}
   out+='<div class="cards">';
   for(var i=0;i<G.onboarding.length;i++){
