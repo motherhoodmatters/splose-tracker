@@ -161,7 +161,7 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();const allOverrides=await getFollowupOverrides();
+    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();const allOverrides=await getFollowupOverrides();const onboardingRemovedSet=await getOnboardingRemoved();
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
@@ -208,6 +208,10 @@ app.get('/api/clients',async function(req,res){
       // Skip if all appointments are student/mentoring services
       const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
       if(!hasNonStudentAppt){console.log('  skipping - student only');continue;}
+      // Skip if currently in onboarding (not yet completed)
+      const onboardingCache=await getCache('onboarding',true)||[];
+      const inOnboarding=onboardingCache.some(function(c){return c.id===String(p.id);});
+      if(inOnboarding&&!onboardingRemovedSet.has(String(p.id))){console.log('  skipping - in onboarding');continue;}
       // Auto-restore if removed client has new appointment after removal date
       const removedAt=removedMap[String(p.id)];
       if(removedAt){
