@@ -181,6 +181,9 @@ app.get('/api/clients',async function(req,res){
     }
     syncLocks.clients=true;
     console.log('Full sync starting...');
+    const onboardingSnapshot=await getCache('onboarding',true)||[];
+    const onboardingIds=new Set(onboardingSnapshot.map(function(c){return c.id;}));
+    console.log('Onboarding clients to exclude:', onboardingIds.size);
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
     pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
@@ -208,6 +211,8 @@ app.get('/api/clients',async function(req,res){
       // Skip if all appointments are student/mentoring services
       const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
       if(!hasNonStudentAppt){console.log('  skipping - student only');continue;}
+      // Skip if currently in onboarding and not yet completed
+      if(onboardingIds.has(String(p.id))&&!onboardingRemovedSet.has(String(p.id))){console.log('  skipping - in onboarding');continue;}
 
       // Auto-restore if removed client has new appointment after removal date
       const removedAt=removedMap[String(p.id)];

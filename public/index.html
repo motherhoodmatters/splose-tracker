@@ -368,9 +368,15 @@ function renderOnboardingList(){
   var out=renderTabs()+renderObAddModal();
   out+='<div class="hdr"><div><h1>Onboarding</h1><p class="sub">'+G.onboarding.length+' new clients</p></div><div class="hdr-right">'+(G.onboardingSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.onboardingSyncedAt)+'</div>':'')+sb+'<button class="pri" onclick="doAddOnboardingManual()" style="margin-left:8px;">+ Add manually</button></div></div>';
   if(!G.onboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No new clients to onboard.</p>'+sb+'</div>';return out;}
+  var sortedOnboarding=G.onboarding.slice().sort(function(a,b){
+    var ad=(a.tasks||[]).filter(function(t){return t.done;}).length;
+    var bd=(b.tasks||[]).filter(function(t){return t.done;}).length;
+    if(bd!==ad)return bd-ad;
+    return (a.firstAppt||'') < (b.firstAppt||'') ? 1 : -1;
+  });
   out+='<div class="cards">';
-  for(var i=0;i<G.onboarding.length;i++){
-    var c=G.onboarding[i];
+  for(var i=0;i<sortedOnboarding.length;i++){
+    var c=sortedOnboarding[i];
     var tasks=c.tasks||[];
     var done=tasks.filter(function(t){return t.done;}).length;
     var total=tasks.length;
@@ -463,9 +469,15 @@ function renderSOList(){
   out+='<div class="hdr"><div><h1>Student Onboarding</h1><p class="sub">'+G.studentOnboarding.length+' student'+(G.studentOnboarding.length!==1?'s':'')+'</p></div>';
   out+='<div class="hdr-right"><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div></div>';
   if(!G.studentOnboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students to onboard.</p><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div>';return out;}
+  var sortedSO=G.studentOnboarding.slice().sort(function(a,b){
+    var ad=(a.tasks||[]).filter(function(t){return t.done;}).length;
+    var bd=(b.tasks||[]).filter(function(t){return t.done;}).length;
+    if(bd!==ad)return bd-ad;
+    return (a.firstAppt||'') < (b.firstAppt||'') ? 1 : -1;
+  });
   out+='<div class="cards">';
-  for(var i=0;i<G.studentOnboarding.length;i++){
-    var c=G.studentOnboarding[i];
+  for(var i=0;i<sortedSO.length;i++){
+    var c=sortedSO[i];
     var tasks=c.tasks||[];
     var done=tasks.filter(function(t){return t.done;}).length;
     var total=tasks.length;
