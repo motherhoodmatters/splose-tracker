@@ -178,7 +178,10 @@ app.get('/api/clients',async function(req,res){
       await waitForLock('clients');
       const justFinished=await getCache('clients');
       if(justFinished&&justFinished.length>0){
-        const out=justFinished.filter(function(c){return !removedMap[c.id];}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
+        const obSnap2=await getCache('onboarding',true)||[];
+        const obIds2=new Set(obSnap2.map(function(c){return c.id;}));
+        const obRemoved2=await getOnboardingRemoved();
+        const out=justFinished.filter(function(c){return !removedMap[c.id]&&(!obIds2.has(c.id)||obRemoved2.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
         return res.json({clients:out,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -186,6 +189,7 @@ app.get('/api/clients',async function(req,res){
     console.log('Full sync starting...');
     const onboardingSnapshot=await getCache('onboarding',true)||[];
     const onboardingIds=new Set(onboardingSnapshot.map(function(c){return c.id;}));
+    const onboardingRemovedSet=await getOnboardingRemoved();
     console.log('Onboarding clients to exclude:', onboardingIds.size);
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
