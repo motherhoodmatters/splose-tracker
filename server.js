@@ -166,7 +166,9 @@ app.get('/api/clients',async function(req,res){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' clients from DB cache');
-        const clients=cached.filter(function(c){return !removedMap[c.id];}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
+        const onboardingSnap=await getCache('onboarding',true)||[];
+        const onboardingIdSet=new Set(onboardingSnap.map(function(c){return c.id;}));
+        const clients=cached.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||onboardingRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
