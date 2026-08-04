@@ -296,13 +296,19 @@ app.post('/api/onboarding-action',async function(req,res){
   const tasks=req.body.tasks;
   if(clientId&&tasks!==undefined){
     await setOnboardingTasks(clientId,tasks);
+    await touchLastAction(clientId);
+    const now=new Date().toISOString();
     const cached=await getCache('onboarding');
     if(cached){
-      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{tasks:tasks}):c;});
+      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{tasks:tasks,lastAction:now}):c;});
       await setCache('onboarding',updated);
     }
+    const cachedSO=await getCache('student-onboarding',true);
+    if(cachedSO){
+      const updatedSO=cachedSO.map(function(c){return c.id===clientId?Object.assign({},c,{tasks:tasks,lastAction:now}):c;});
+      await setCache('student-onboarding',updatedSO);
+    }
   }
-  await touchLastAction(clientId);
   res.json({ok:true});
 });
 app.post('/api/status',async function(req,res){
