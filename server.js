@@ -22,6 +22,7 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS removed_onboarding(client_id TEXT PRIMARY KEY,removed_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS followup_overrides(client_id TEXT PRIMARY KEY,days INTEGER,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS last_actions(client_id TEXT PRIMARY KEY,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   
   console.log('DB ready');
 }
@@ -95,6 +96,15 @@ async function setStatus(clientId,status){
   }
 }
 
+async function touchLastAction(clientId){
+  await pool.query('INSERT INTO last_actions(client_id,updated_at) VALUES($1,NOW()) ON CONFLICT(client_id) DO UPDATE SET updated_at=NOW()',[clientId]);
+}
+async function getLastActions(){
+  const r=await pool.query('SELECT client_id,updated_at FROM last_actions');
+  const out={};
+  r.rows.forEach(function(row){out[row.client_id]=row.updated_at;});
+  return out;
+}
 async function getFollowupOverrides(){
   const r=await pool.query('SELECT client_id,days FROM followup_overrides');
   const out={};
@@ -161,7 +171,7 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();const allOverrides=await getFollowupOverrides()
+    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();const allOverrides=await getFollowupOverrides();const onboardingRemovedSet=await getOnboardingRemoved();const allLastActions=await getLastActions();
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
@@ -169,7 +179,7 @@ app.get('/api/clients',async function(req,res){
         const onboardingSnap=await getCache('onboarding',true)||[];
         const onboardingIdSet=new Set(onboardingSnap.map(function(c){return c.id;}));
         const obRemovedSet=await getOnboardingRemoved();
-        const clients=cached.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||obRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
+        const clients=cached.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||obRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -181,7 +191,7 @@ app.get('/api/clients',async function(req,res){
         const obSnap2=await getCache('onboarding',true)||[];
         const obIds2=new Set(obSnap2.map(function(c){return c.id;}));
         const obRemoved2=await getOnboardingRemoved();
-        const out=justFinished.filter(function(c){return !removedMap[c.id]&&(!obIds2.has(c.id)||obRemoved2.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null});});
+        const out=justFinished.filter(function(c){return !removedMap[c.id]&&(!obIds2.has(c.id)||obRemoved2.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null});});
         return res.json({clients:out,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -189,7 +199,6 @@ app.get('/api/clients',async function(req,res){
     console.log('Full sync starting...');
     const onboardingSnapshot=await getCache('onboarding',true)||[];
     const onboardingIds=new Set(onboardingSnapshot.map(function(c){return c.id;}));
-    const onboardingRemovedSet=await getOnboardingRemoved();
     console.log('Onboarding clients to exclude:', onboardingIds.size);
     const pracs=await allPages('/practitioners').catch(function(){return [];});
     const pnames={};
@@ -236,7 +245,7 @@ app.get('/api/clients',async function(req,res){
       }
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
-      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null});
+      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null,lastAction:allLastActions[String(p.id)]||null});
       if((i+1)%50===0){
         const progress=clients.filter(function(c){return !removedMap[c.id];});
         await setCache('clients',progress);
@@ -293,6 +302,7 @@ app.post('/api/onboarding-action',async function(req,res){
       await setCache('onboarding',updated);
     }
   }
+  await touchLastAction(clientId);
   res.json({ok:true});
 });
 app.post('/api/status',async function(req,res){
@@ -300,6 +310,7 @@ app.post('/api/status',async function(req,res){
   const status=req.body.status||null;
   if(clientId){
     await setStatus(clientId,status);
+    await touchLastAction(clientId);
     const cached=await getCache('clients');
     if(cached){
       const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{manualStatus:status}):c;});
@@ -319,9 +330,10 @@ app.post('/api/action',async function(req,res){
   const tasks=req.body.tasks;
   if(clientId&&tasks!==undefined){
     await setTasks(clientId,tasks);
+    await touchLastAction(clientId);
     const cached=await getCache('clients');
     if(cached){
-      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{tasks:tasks}):c;});
+      const updated=cached.map(function(c){return c.id===clientId?Object.assign({},c,{tasks:tasks,lastAction:new Date().toISOString()}):c;});
       await setCache('clients',updated);
     }
   }
@@ -335,6 +347,7 @@ app.get('/api/students',async function(req,res){
   try{
     const allTasks=await getTasks();
     const allStatuses=await getStatuses();
+    const allLastActions=await getLastActions();
     function programsFor(id){
       var s=allStatuses[id];
       if(s&&s.indexOf('programs_')===0)return s.slice(9).split(',').filter(Boolean);
@@ -345,7 +358,7 @@ app.get('/api/students',async function(req,res){
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' students from cache');
         const removedStudents=await getStudentRemoved();
-        const students=cached.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id)});});
+        const students=cached.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null});});
         return res.json({students:students,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -406,7 +419,8 @@ app.get('/api/students',async function(req,res){
         practitioner:pnames[p.practitionerId]||'',
         appointments:interactions.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===399669};}),
         tasks:allTasks[String(p.id)]||[],
-        programs:programsFor(String(p.id))
+        programs:programsFor(String(p.id)),
+        lastAction:allLastActions[String(p.id)]||null
       });
     }
     await setCache('students',students);

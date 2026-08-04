@@ -369,6 +369,9 @@ function renderOnboardingList(){
   out+='<div class="hdr"><div><h1>Onboarding</h1><p class="sub">'+G.onboarding.length+' new clients</p></div><div class="hdr-right">'+(G.onboardingSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.onboardingSyncedAt)+'</div>':'')+sb+'<button class="pri" onclick="doAddOnboardingManual()" style="margin-left:8px;">+ Add manually</button></div></div>';
   if(!G.onboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No new clients to onboard.</p>'+sb+'</div>';return out;}
   var sortedOnboarding=G.onboarding.slice().sort(function(a,b){
+    var la=a.lastAction?new Date(a.lastAction).getTime():0;
+    var lb=b.lastAction?new Date(b.lastAction).getTime():0;
+    if(la!==lb)return lb-la;
     var ad=(a.tasks||[]).filter(function(t){return t.done;}).length;
     var bd=(b.tasks||[]).filter(function(t){return t.done;}).length;
     if(bd!==ad)return bd-ad;
@@ -470,6 +473,9 @@ function renderSOList(){
   out+='<div class="hdr-right"><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div></div>';
   if(!G.studentOnboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students to onboard.</p><button class="pri" onclick="doAddStudentOnboarding()">+ Add student</button></div>';return out;}
   var sortedSO=G.studentOnboarding.slice().sort(function(a,b){
+    var la=a.lastAction?new Date(a.lastAction).getTime():0;
+    var lb=b.lastAction?new Date(b.lastAction).getTime():0;
+    if(la!==lb)return lb-la;
     var ad=(a.tasks||[]).filter(function(t){return t.done;}).length;
     var bd=(b.tasks||[]).filter(function(t){return t.done;}).length;
     if(bd!==ad)return bd-ad;
@@ -597,6 +603,9 @@ function renderStudentCards(){
   var bHold=b.programs&&b.programs.indexOf('Hold')>=0;
   if(aHold&&!bHold)return 1;
   if(!aHold&&bHold)return -1;
+  var la=a.lastAction?new Date(a.lastAction).getTime():0;
+  var lb=b.lastAction?new Date(b.lastAction).getTime():0;
+  if(la!==lb)return lb-la;
   var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';
   var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';
   return db>da?1:db<da?-1:0;
@@ -661,6 +670,9 @@ function getList(){
   }).sort(function(a,b){
     var so=order[a.st]-order[b.st];
     if(so!==0)return so;
+    var la=a.lastAction?new Date(a.lastAction).getTime():0;
+    var lb=b.lastAction?new Date(b.lastAction).getTime():0;
+    if(la!==lb)return lb-la;
     var da=a.lastRealAppt||a.end||'';
     var db=b.lastRealAppt||b.end||'';
     return db>da?1:db<da?-1:0;
@@ -687,6 +699,9 @@ function renderStudentList(){
   var bHold=b.programs&&b.programs.indexOf('Hold')>=0;
   if(aHold&&!bHold)return 1;
   if(!aHold&&bHold)return -1;
+  var la=a.lastAction?new Date(a.lastAction).getTime():0;
+  var lb=b.lastAction?new Date(b.lastAction).getTime():0;
+  if(la!==lb)return lb-la;
   var da=a.appointments&&a.appointments.length?a.appointments[0].date:'';
   var db=b.appointments&&b.appointments.length?b.appointments[0].date:'';
   return db>da?1:db<da?-1:0;
