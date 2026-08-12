@@ -861,6 +861,7 @@ function renderDetail(){
   out+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:10px">';
   out+='<div><h2 style="font-size:18px;font-weight:600;margin-bottom:4px">'+esc(c.name)+'</h2>';
   if(c.practitioner)out+='<p class="sub">'+esc(c.practitioner)+'</p>';
+  if(c.mobile)out+='<p class="sub"><a href="tel:'+esc(c.mobile)+'" style="color:#0d9488;text-decoration:none;">📱 '+esc(c.mobile)+'</a></p>';
   out+='</div><span class="badge '+SBC[c.st]+'">'+SL[c.st]+(isM?' (manual)':'')+'</span></div>';
   out+='<div class="mini-grid">';
   out+='<div class="mini"><p>Last appointment</p><p>'+fmtDate(c.lastRealAppt)+'</p></div>';

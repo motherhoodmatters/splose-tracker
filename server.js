@@ -179,7 +179,7 @@ app.get('/api/clients',async function(req,res){
         const onboardingSnap=await getCache('onboarding',true)||[];
         const onboardingIdSet=new Set(onboardingSnap.map(function(c){return c.id;}));
         const obRemovedSet=await getOnboardingRemoved();
-        const clients=cached.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||obRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null});});
+        const clients=cached.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||obRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null,mobile:c.mobile||null});});
         return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -191,7 +191,7 @@ app.get('/api/clients',async function(req,res){
         const obSnap2=await getCache('onboarding',true)||[];
         const obIds2=new Set(obSnap2.map(function(c){return c.id;}));
         const obRemoved2=await getOnboardingRemoved();
-        const out=justFinished.filter(function(c){return !removedMap[c.id]&&(!obIds2.has(c.id)||obRemoved2.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null});});
+        const out=justFinished.filter(function(c){return !removedMap[c.id]&&(!obIds2.has(c.id)||obRemoved2.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null,mobile:c.mobile||null});});
         return res.json({clients:out,syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
@@ -245,7 +245,7 @@ app.get('/api/clients',async function(req,res){
       }
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
-      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null,lastAction:allLastActions[String(p.id)]||null});
+      clients.push({id:String(p.id),name:name,mobile:p.mobileNumber||p.mobile||p.phone||null,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null,lastAction:allLastActions[String(p.id)]||null});
       if((i+1)%50===0){
         const progress=clients.filter(function(c){return !removedMap[c.id];});
         await setCache('clients',progress);
