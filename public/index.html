@@ -572,7 +572,7 @@ function renderClientCards(){
     if(pendingTasks.length>0){
       html+='<div class="card-tasks">';
       pendingTasks.slice(0,2).forEach(function(tk){
-        html+='<div class="task-row"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a||'')+'</span><span style="flex:1;color:'+(tk.done?'#aaa':'#555')+';'+(tk.done?'text-decoration:line-through;':'')+'">'+esc(tk.n||tk.note||'')+'</span></div>';
+        html+='<div class="task-row"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc((tk.a==='Annie'?'Priority':tk.a)||'')+'</span><span style="flex:1;color:'+(tk.done?'#aaa':'#555')+';'+(tk.done?'text-decoration:line-through;':'')+'">'+esc(tk.n||tk.note||'')+'</span></div>';
       });
       if(pendingTasks.length>2)html+='<div style="font-size:11px;color:#888;">+'+(pendingTasks.length-2)+' more</div>';
       html+='</div>';
@@ -624,7 +624,7 @@ function renderStudentCards(){
     if(pending.length>0){
       html+='<div class="card-tasks">';
       pending.slice(0,2).forEach(function(tk){
-        html+='<div class="task-row"><span class="task-tag tag-'+(tk.assignee==='Felicity'||tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee||tk.a||'')+'</span><span style="flex:1;color:#555">'+esc(tk.note||tk.n||'')+'</span></div>';
+        html+='<div class="task-row"><span class="task-tag tag-'+(tk.assignee==='Felicity'||tk.a==='Felicity'?'felicity':'annie')+'">'+esc(((tk.assignee||tk.a)==='Annie'?'Priority':(tk.assignee||tk.a))||'')+'</span><span style="flex:1;color:#555">'+esc(tk.note||tk.n||'')+'</span></div>';
       });
       if(pending.length>2)html+='<div style="font-size:11px;color:#888;">+'+(pending.length-2)+' more</div>';
       html+='</div>';
@@ -721,7 +721,7 @@ function renderStudentList(){
       out+='<div class="card-tasks">';
       for(var t=0;t<pending.length;t++){
         var tk=pending[t];
-        out+='<div class="task-row"><span class="task-tag tag-'+(tk.assignee==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee)+'</span><span style="flex:1;color:#555">'+esc(tk.note)+'</span></div>';
+        out+='<div class="task-row"><span class="task-tag tag-'+(tk.assignee==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee==='Annie'?'Priority':tk.assignee)+'</span><span style="flex:1;color:#555">'+esc(tk.note)+'</span></div>';
       }
       out+='</div>';
     }
@@ -757,7 +757,7 @@ function renderStudentDetail(){
   out+='<div class="section-box"><h3>Tasks</h3>';
   for(var ti=0;ti<tasks.length;ti++){
     var tk=tasks[ti];
-    out+='<div class="etask etask-'+(tk.assignee==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.5':'')+'"><span class="task-tag tag-'+(tk.assignee==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee)+'</span>';
+    out+='<div class="etask etask-'+(tk.assignee==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.5':'')+'"><span class="task-tag tag-'+(tk.assignee==='Felicity'?'felicity':'annie')+'">'+esc(tk.assignee==='Annie'?'Priority':tk.assignee)+'</span>';
     out+=(G.editingTask===tk.id+'_s'?'<input value="'+esc(tk.note||tk.n||'')+'" id="sedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+s.id+'\',\''+tk.id+'\',document.getElementById(\'sedit_'+ti+'\').value,\'students\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+s.id+'\',\''+tk.id+'\',this.value,\'students\')" />':'<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'_s\';render()">'+esc(tk.note||tk.n||'')+'</span>');
     out+='<button class="done-btn" onclick="event.stopPropagation();doToggleStudentTask(\''+s.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
     out+='<button class="done-btn" style="color:#b32020" onclick="event.stopPropagation();doRemoveStudentTask(\''+s.id+'\',\''+tk.id+'\')">x</button>';
@@ -829,7 +829,7 @@ function renderList(){
       out+='<div class="card-tasks">';
       for(var t=0;t<pendingTasks.length;t++){
         var tk=pendingTasks[t];
-        out+='<div class="task-row"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a)+'</span>';
+        out+='<div class="task-row"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a==='Annie'?'Priority':tk.a)+'</span>';
         out+='<span style="flex:1;color:'+(tk.done?'#aaa':'#555')+';'+(tk.done?'text-decoration:line-through;':'')+'">'+esc(tk.n)+'</span></div>';
       }
       out+='</div>';
@@ -890,7 +890,7 @@ function renderDetail(){
   out+='<div class="section-box"><h3>Tasks</h3>';
   for(var ti=0;ti<tasks.length;ti++){
     var tk=tasks[ti];
-    out+='<div class="etask etask-'+(tk.a==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.5':'')+'"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a)+'</span>';
+    out+='<div class="etask etask-'+(tk.a==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.5':'')+'"><span class="task-tag tag-'+(tk.a==='Felicity'?'felicity':'annie')+'">'+esc(tk.a==='Annie'?'Priority':tk.a)+'</span>';
     out+=(G.editingTask===tk.id+'_c'?'<input value="'+esc(tk.n||'')+'" id="cedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'cedit_'+ti+'\').value,\'clients\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'clients\')" />':'<span style="flex:1;font-size:13px;'+(tk.done?'text-decoration:line-through;color:#aaa':'color:#333')+'" ondblclick="G.editingTask=\''+tk.id+'_c\';render()">'+esc(tk.n||tk.note||'')+'</span>');
     out+='<button class="done-btn" onclick="doToggleTask(\''+c.id+'\',\''+tk.id+'\')">'+(tk.done?'Undo':'Done')+'</button>';
     out+='<button class="done-btn" style="color:#b32020" onclick="doRemoveTask(\''+c.id+'\',\''+tk.id+'\')">x</button>';
