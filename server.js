@@ -245,7 +245,7 @@ console.log('Patient '+(i+1)+'/'+patients.length+': '+name);
       }
       const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
       const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
-      if(i===0)console.log('phoneNumbers sample:',JSON.stringify(p.phoneNumbers));
+      if(!global._phoneLogged){global._phoneLogged=true;console.log('phoneNumbers sample for '+name+':',JSON.stringify(p.phoneNumbers));}
       var mob=null;if(p.phoneNumbers&&p.phoneNumbers.length){var mobEntry=p.phoneNumbers.find(function(ph){return ph.type==='Mobile'||ph.type==='mobile';});mob=mobEntry?mobEntry.number:(p.phoneNumbers[0]?p.phoneNumbers[0].number:null);}
       clients.push({id:String(p.id),name:name,mobile:mob,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null,lastAction:allLastActions[String(p.id)]||null});
       if((i+1)%50===0){
