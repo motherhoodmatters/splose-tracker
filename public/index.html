@@ -415,7 +415,7 @@ function renderOnboardingDetail(){
     var tk=tasks[ti];
     var isEditing=G.editingTask===tk.id;
     var ta=tk.a||tk.assignee||'Annie';
-    out+='<div class="etask etask-'+(ta==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-'+(ta==='Felicity'?'felicity':'annie')+'">'+esc(ta)+'</span>';
+    out+='<div class="etask etask-'+(ta==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-'+(ta==='Felicity'?'felicity':'annie')+'">'+esc(ta==='Annie'?'Priority':ta)+'</span>';
     if(isEditing){
       out+='<input value="'+esc(tk.n||'')+'" id="obedit_'+ti+'" style="flex:1;font-size:13px" onblur="(function(){var v=document.getElementById(\'obedit_'+ti+'\');if(v)doEditTask(\''+c.id+'\',\''+tk.id+'\',v.value,\'onboarding\')})()" />';
     } else {
@@ -427,7 +427,7 @@ function renderOnboardingDetail(){
   }
   out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px;margin-top:8px"><div class="assignee-btns">';
   out+='<button class="assignee-btn '+(G.newTask.a==='Felicity'?'sel-f':'')+'" onclick="G.newTask.a=\'Felicity\';render()">Felicity</button>';
-  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Annie</button>';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Priority</button>';
   out+='</div><textarea placeholder="Add extra task..." oninput="G.newTask.n=this.value">'+esc(G.newTask.n)+'</textarea>';
   out+='<button class="pri" onclick="doSaveOnboardingTask()" '+(G.newTask.a?'':'disabled')+' style="margin-top:10px;width:100%;justify-content:center">Add task</button>';
   out+='</div></div>';
@@ -499,7 +499,7 @@ function renderSOList(){
     if(pending.length>0){
       out+='<div class="card-tasks">';
       pending.slice(0,3).forEach(function(t){
-        out+='<div class="task-row"><span class="task-tag tag-'+(t.a==='Felicity'?'felicity':'annie')+'">'+esc(t.a||'Annie')+'</span><span style="flex:1;color:#555;font-size:12px;">'+esc(t.n)+'</span></div>';
+        out+='<div class="task-row"><span class="task-tag tag-'+(t.a==='Felicity'?'felicity':'annie')+'">'+esc((t.a==='Annie'?'Priority':t.a)||'Priority')+'</span><span style="flex:1;color:#555;font-size:12px;">'+esc(t.n)+'</span></div>';
       });
       if(pending.length>3)out+='<div style="font-size:11px;color:#888;padding:2px 0;">+'+( pending.length-3)+' more</div>';
       out+='</div>';
@@ -534,7 +534,7 @@ function renderSODetail(){
     var tk=tasks[ti];
     var isEditing=G.editingTask===tk.id;
     var ta=tk.a||'Annie';
-    out+='<div class="etask etask-'+(ta==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-'+(ta==='Felicity'?'felicity':'annie')+'">'+esc(ta)+'</span>';
+    out+='<div class="etask etask-'+(ta==='Felicity'?'f':'a')+'" style="'+(tk.done?'opacity:.6':'')+'"><span class="task-tag tag-'+(ta==='Felicity'?'felicity':'annie')+'">'+esc(ta==='Annie'?'Priority':ta)+'</span>';
     if(isEditing){
       out+='<input value="'+esc(tk.n||'')+'" id="soedit_'+ti+'" style="flex:1;font-size:13px" onblur="doEditTask(\''+c.id+'\',\''+tk.id+'\',document.getElementById(\'soedit_'+ti+'\').value,\'studentOnboarding\')" onkeydown="if(event.key===\'Enter\')doEditTask(\''+c.id+'\',\''+tk.id+'\',this.value,\'onboarding\')" />';
     } else {
@@ -546,7 +546,7 @@ function renderSODetail(){
   }
   out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px;margin-top:8px"><div class="assignee-btns">';
   out+='<button class="assignee-btn '+(G.newTask.a==='Felicity'?'sel-f':'')+'" onclick="G.newTask.a=\'Felicity\';render()">Felicity</button>';
-  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Annie</button>';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Priority</button>';
   out+='</div><textarea placeholder="Add extra note..." oninput="G.newTask.n=this.value">'+esc(G.newTask.n)+'</textarea>';
   out+='<button class="pri" onclick="doSaveSOTask()" '+(G.newTask.a?'':'disabled')+' style="margin-top:10px;width:100%;justify-content:center">Add task</button>';
   out+='</div></div>';
@@ -765,7 +765,7 @@ function renderStudentDetail(){
   }
   out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px"><div class="assignee-btns">';
   out+='<button class="assignee-btn '+(G.newTask.a==='Felicity'?'sel-f':'')+'" onclick="G.newTask.a=\'Felicity\';render()">Felicity</button>';
-  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Annie</button>';
+  out+='<button class="assignee-btn '+(G.newTask.a==='Annie'?'sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Priority</button>';
   out+='</div><textarea placeholder="e.g. Module 3 marked, Case study 2 pending..." oninput="G.newTask.n=this.value">'+esc(G.newTask.n)+'</textarea>';
   out+='<button class="pri" onclick="doSaveStudentTask()" '+(G.newTask.a?'':'disabled')+' style="margin-top:10px;width:100%;justify-content:center">Add task</button>';
   out+='</div></div>';
@@ -899,7 +899,7 @@ function renderDetail(){
   out+='<div style="padding:12px;background:#f7f7f5;border-radius:8px">';
   out+='<div class="assignee-btns">';
   out+='<button class="assignee-btn'+(G.newTask.a==='Felicity'?' sel-f':'')+'" onclick="G.newTask.a=\'Felicity\';render()">Felicity</button>';
-  out+='<button class="assignee-btn'+(G.newTask.a==='Annie'?' sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Annie</button>';
+  out+='<button class="assignee-btn'+(G.newTask.a==='Annie'?' sel-a':'')+'" onclick="G.newTask.a=\'Annie\';render()">Priority</button>';
   out+='</div>';
   out+='<textarea placeholder="Describe the task..." oninput="G.newTask.n=this.value">'+esc(G.newTask.n)+'</textarea>';
   out+='<button class="pri" onclick="doSaveTask()" '+(G.newTask.a?'':'disabled')+' style="margin-top:10px;width:100%;justify-content:center">Add task</button>';
