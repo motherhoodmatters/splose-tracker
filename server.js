@@ -209,6 +209,7 @@ app.get('/api/clients',async function(req,res){
     for(var i=0;i<patients.length;i++){
       const p=patients[i];
       const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
+      if(i===0)console.log('Patient fields:',JSON.stringify(Object.keys(p)));
       console.log('Patient '+(i+1)+'/'+patients.length+': '+name);
       var appts;
       try{
