@@ -437,7 +437,12 @@ function renderOnboardingDetail(){
 function doSetProgram(id,program){
   var cur=G.studentOnboarding.find(function(x){return x.id===id;});
   if(!cur)return;
-  var progs=cur.programs?cur.programs.slice():(cur.program?[cur.program]:[]);
+  var raw=cur.programs&&cur.programs.length?cur.programs:(cur.program?cur.program.split(','):[]);
+  var progs=[];
+  raw.forEach(function(p){
+    var trimmed=(p||'').trim();
+    if(trimmed&&progs.indexOf(trimmed)<0)progs.push(trimmed);
+  });
   var idx=progs.indexOf(program);
   if(idx>=0){progs.splice(idx,1);}else{progs.push(program);}
   G.studentOnboarding=G.studentOnboarding.map(function(x){return x.id===id?Object.assign({},x,{programs:progs,program:progs[0]||null}):x;});
