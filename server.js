@@ -156,12 +156,137 @@ async function allPages(ep,params){
   return results;
 }
 
-const syncLocks={clients:false,students:false,onboarding:false};
-async function waitForLock(key){
+const syncLock={active:false};
+async function waitForFullSync(){
   let waited=0;
-  while(syncLocks[key]&&waited<120000){
+  while(syncLock.active&&waited<180000){
     await wait(1000);
     waited+=1000;
+  }
+}
+
+const ONBOARDING_DEFAULT_TASKS=[{id:'ob1',assignee:'Annie',n:'Contact card sent to Felicity',done:false},{id:'ob2',assignee:'Annie',n:'Registration',done:false},{id:'ob3',assignee:'Annie',n:'Consent',done:false},{id:'ob4',assignee:'Annie',n:'Safety Checklist if Home',done:false},{id:'ob5',assignee:'Annie',n:'Address to consult if home',done:false},{id:'ob6',assignee:'Annie',n:'DOB and Medicare (if applicable) added',done:false},{id:'ob7',assignee:'Annie',n:'Joined Circle',done:false},{id:'ob8',assignee:'Annie',n:'Circle chat opened and welcome message sent',done:false}];
+
+// Single shared full sync: one pass over all patients, one appointments fetch per patient,
+// used to populate clients, students, and onboarding caches together instead of three
+// separate full scans. Progress checkpoints go to *_staging keys (crash recovery only) -
+// the live clients/students/onboarding cache keys are only written once the sync fully
+// completes, so a page load mid-sync keeps serving the last complete list.
+async function runFullSync(){
+  syncLock.active=true;
+  try{
+    console.log('Full sync starting (clients+students+onboarding, shared pass)...');
+    const allTasks=await getTasks();
+    const allStatuses=await getStatuses();
+    const removedMap=await getRemoved();
+    const studentRemovedRows=await pool.query('SELECT client_id,removed_at FROM removed_students');
+    const studentRemovedMap={};
+    studentRemovedRows.rows.forEach(function(r){studentRemovedMap[r.client_id]=r.removed_at;});
+    const allOverrides=await getFollowupOverrides();
+    const onboardingRemovedSet=await getOnboardingRemoved();
+    const allLastActions=await getLastActions();
+    const onboardingTasksMap=await getOnboardingTasks();
+
+    const pracs=await allPages('/practitioners').catch(function(){return [];});
+    const pnames={};
+    pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
+    const patients=await allPages('/patients');
+    console.log(patients.length+' patients');
+
+    const MENTORING_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283]);
+    const INTERACTION_IDS=new Set([399651,399621,399669]);
+    const ONBOARDING_STUDENT_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283,444486]);
+
+    const clients=[],students=[],onboarding=[];
+
+    for(var i=0;i<patients.length;i++){
+      const p=patients[i];
+      const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
+      var appts;
+      try{
+        appts=await allPages('/appointments',{patientId:p.id});
+      }catch(syncErr){
+        console.log('  sync interrupted at patient '+(i+1)+'/'+patients.length+' - staging partial results ('+clients.length+' clients, '+students.length+' students, '+onboarding.length+' onboarding)');
+        await setCache('clients_staging',clients);
+        await setCache('students_staging',students);
+        await setCache('onboarding_staging',onboarding);
+        throw syncErr;
+      }
+      await wait(700);
+
+      // ---- Students ----
+      const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
+      if(mentoringAppts.length){
+        const studentRemovedAt=studentRemovedMap[String(p.id)];
+        var includeStudent=true;
+        if(studentRemovedAt){
+          const hasNewApptS=mentoringAppts.some(function(a){return new Date(a.start)>new Date(studentRemovedAt);});
+          if(hasNewApptS){
+            await pool.query('DELETE FROM removed_students WHERE client_id=$1',[String(p.id)]);
+          } else {
+            includeStudent=false;
+          }
+        }
+        if(includeStudent){
+          const interactions=mentoringAppts.filter(function(a){return INTERACTION_IDS.has(Number(a.serviceId));}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
+          const statusVal=allStatuses[String(p.id)];
+          const programs=(statusVal&&statusVal.indexOf('programs_')===0)?statusVal.slice(9).split(',').filter(Boolean):[];
+          students.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',appointments:interactions.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===399669};}),tasks:allTasks[String(p.id)]||[],programs:programs,lastAction:allLastActions[String(p.id)]||null});
+        }
+      }
+
+      // ---- Onboarding ----
+      const sortedAsc=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(a.start)-new Date(b.start);});
+      const firstAppt=sortedAsc[0];
+      var isOnboardingNow=false;
+      if(firstAppt&&firstAppt.start>='2026-06-04'&&!onboardingRemovedSet.has(String(p.id))){
+        const isStudentSvc=sortedAsc.some(function(a){return ONBOARDING_STUDENT_IDS.has(Number(a.serviceId));});
+        if(!isStudentSvc){
+          isOnboardingNow=true;
+          const existingTasks=onboardingTasksMap[String(p.id)];
+          const tasks=existingTasks||ONBOARDING_DEFAULT_TASKS.map(function(t){return Object.assign({},t,{id:t.id+'_'+p.id});});
+          onboarding.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',firstAppt:firstAppt.start.split('T')[0],tasks:tasks});
+        }
+      }
+
+      // ---- Clients ----
+      const realAppts=appts.filter(function(a){return a.start&&Number(a.serviceId)!==CHECKIN_ID;});
+      const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
+      const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
+      if(hasRecent&&hasNonStudentAppt&&!isOnboardingNow){
+        const removedAt=removedMap[String(p.id)];
+        var includeClient=true;
+        if(removedAt){
+          const hasNewAppt=realAppts.some(function(a){return new Date(a.start)>new Date(removedAt);});
+          if(hasNewAppt){
+            await pool.query('DELETE FROM removed WHERE client_id=$1',[String(p.id)]);
+            delete removedMap[String(p.id)];
+          } else {
+            includeClient=false;
+          }
+        }
+        if(includeClient){
+          const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
+          const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
+          var mob=null;if(p.phoneNumbers&&p.phoneNumbers.length){var mobEntry=p.phoneNumbers.find(function(ph){return ph.type==='Mobile'||ph.type==='mobile';});var chosen=mobEntry||p.phoneNumbers[0];if(chosen)mob=(chosen.code||'')+(chosen.phoneNumber||'');}
+          clients.push({id:String(p.id),name:name,mobile:mob,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null,lastAction:allLastActions[String(p.id)]||null});
+        }
+      }
+
+      if((i+1)%50===0){
+        await setCache('clients_staging',clients);
+        await setCache('students_staging',students);
+        await setCache('onboarding_staging',onboarding);
+        console.log('  progress checkpoint '+(i+1)+'/'+patients.length+' - '+clients.length+' clients, '+students.length+' students, '+onboarding.length+' onboarding so far (staged, not live yet)');
+      }
+    }
+
+    await setCache('clients',clients);
+    await setCache('students',students);
+    await setCache('onboarding',onboarding);
+    console.log('DONE! '+clients.length+' clients, '+students.length+' students, '+onboarding.length+' onboarding');
+  } finally {
+    syncLock.active=false;
   }
 }
 
@@ -171,93 +296,29 @@ app.get('/api/clients',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
   const fullSync=req.query.full==='true';
   try{
-    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const studentRemovedSet=await getStudentRemoved();const allOverrides=await getFollowupOverrides();const onboardingRemovedSet=await getOnboardingRemoved();const allLastActions=await getLastActions();
+    const allTasks=await getTasks();const allStatuses=await getStatuses();const removedMap=await getRemoved();const allOverrides=await getFollowupOverrides();const allLastActions=await getLastActions();
+    async function decorate(list){
+      const onboardingSnap=await getCache('onboarding',true)||[];
+      const onboardingIdSet=new Set(onboardingSnap.map(function(c){return c.id;}));
+      const obRemovedSet=await getOnboardingRemoved();
+      return list.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||obRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null,mobile:c.mobile||null});});
+    }
     if(!fullSync){
       const cached=await getCache('clients');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' clients from DB cache');
-        const onboardingSnap=await getCache('onboarding',true)||[];
-        const onboardingIdSet=new Set(onboardingSnap.map(function(c){return c.id;}));
-        const obRemovedSet=await getOnboardingRemoved();
-        const clients=cached.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||obRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null,mobile:c.mobile||null});});
-        return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
+        return res.json({clients:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
-    if(syncLocks.clients){
-      console.log('Clients sync already in progress - waiting...');
-      await waitForLock('clients');
-      const justFinished=await getCache('clients');
-      if(justFinished&&justFinished.length>0){
-        const obSnap2=await getCache('onboarding',true)||[];
-        const obIds2=new Set(obSnap2.map(function(c){return c.id;}));
-        const obRemoved2=await getOnboardingRemoved();
-        const out=justFinished.filter(function(c){return !removedMap[c.id]&&(!obIds2.has(c.id)||obRemoved2.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null,mobile:c.mobile||null});});
-        return res.json({clients:out,syncedAt:new Date().toISOString(),fromCache:true});
-      }
+    if(syncLock.active){
+      console.log('Sync already in progress - waiting...');
+      await waitForFullSync();
+    } else {
+      await runFullSync();
     }
-    syncLocks.clients=true;
-    console.log('Full sync starting...');
-    const onboardingSnapshot=await getCache('onboarding',true)||[];
-    const onboardingIds=new Set(onboardingSnapshot.map(function(c){return c.id;}));
-    console.log('Onboarding clients to exclude:', onboardingIds.size);
-    const pracs=await allPages('/practitioners').catch(function(){return [];});
-    const pnames={};
-    pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
-    const patients=await allPages('/patients');
-    console.log(patients.length+' patients');
-    const clients=[];
-    for(var i=0;i<patients.length;i++){
-      const p=patients[i];
-      const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
-console.log('Patient '+(i+1)+'/'+patients.length+': '+name);
-      var appts;
-      try{
-        appts=await allPages('/appointments',{patientId:p.id});
-      }catch(syncErr){
-        console.log('  sync interrupted at patient '+(i+1)+'/'+patients.length+' - saving '+clients.length+' clients found so far');
-        const partial=clients.filter(function(c){return !removedMap[c.id];});
-        if(partial.length>0)await setCache('clients',partial);
-        throw syncErr;
-      }
-      await wait(700);
-      const realAppts=appts.filter(function(a){return a.start&&Number(a.serviceId)!==CHECKIN_ID;});
-      const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
-      if(!hasRecent){console.log('  skipping');continue;}
-      
-      // Skip if all appointments are student/mentoring services
-      const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
-      if(!hasNonStudentAppt){console.log('  skipping - student only');continue;}
-      // Skip if currently in onboarding and not yet completed
-      if(onboardingIds.has(String(p.id))&&!onboardingRemovedSet.has(String(p.id))){console.log('  skipping - in onboarding');continue;}
-
-      // Auto-restore if removed client has new appointment after removal date
-      const removedAt=removedMap[String(p.id)];
-      if(removedAt){
-        const hasNewAppt=realAppts.some(function(a){return new Date(a.start)>new Date(removedAt);});
-        if(hasNewAppt){
-          console.log('  restoring - new appointment after removal');
-          await pool.query('DELETE FROM removed WHERE client_id=$1',[String(p.id)]);
-          delete removedMap[String(p.id)];
-        } else {
-          console.log('  skipping - removed and no new appointments');
-          continue;
-        }
-      }
-      const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
-      const lastReal=sorted.find(function(a){return Number(a.serviceId)!==CHECKIN_ID;});
-      var mob=null;if(p.phoneNumbers&&p.phoneNumbers.length){var mobEntry=p.phoneNumbers.find(function(ph){return ph.type==='Mobile'||ph.type==='mobile';});var chosen=mobEntry||p.phoneNumbers[0];if(chosen)mob=(chosen.code||'')+(chosen.phoneNumber||'');}
-      clients.push({id:String(p.id),name:name,mobile:mob,practitioner:pnames[p.practitionerId]||'',lastRealAppt:lastReal?lastReal.start.split('T')[0]:null,appointments:sorted.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===CHECKIN_ID};}),tasks:allTasks[String(p.id)]||allTasks[p.id]||[],manualStatus:allStatuses[String(p.id)]||null,followupDays:allOverrides[String(p.id)]||null,lastAction:allLastActions[String(p.id)]||null});
-      if((i+1)%50===0){
-        const progress=clients.filter(function(c){return !removedMap[c.id];});
-        await setCache('clients',progress);
-        console.log('  progress saved: '+progress.length+' clients so far');
-      }
-    }
-    const finalClients=clients.filter(function(c){return !removedMap[c.id];});await setCache('clients',finalClients);
-    console.log('DONE! '+finalClients.length+' clients');
-    syncLocks.clients=false;
-    res.json({clients:finalClients,syncedAt:new Date().toISOString()});
-  }catch(err){syncLocks.clients=false;console.error('Error:',err.message);res.status(500).json({error:err.message});}
+    const fresh=await getCache('clients',true)||[];
+    res.json({clients:await decorate(fresh),syncedAt:new Date().toISOString()});
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
 app.get('/api/clearremoved',async function(req,res){
@@ -360,140 +421,53 @@ app.get('/api/students',async function(req,res){
       if(s&&s.indexOf('programs_')===0)return s.slice(9).split(',').filter(Boolean);
       return [];
     }
+    async function decorate(list){
+      const removedStudents=await getStudentRemoved();
+      return list.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null});});
+    }
     if(!fullSync){
       const cached=await getCache('students');
       if(cached&&cached.length>0){
         console.log('Serving '+cached.length+' students from cache');
-        const removedStudents=await getStudentRemoved();
-        const students=cached.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null});});
-        return res.json({students:students,syncedAt:new Date().toISOString(),fromCache:true});
+        return res.json({students:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
-    console.log('Full student sync starting...');
-    const studentRemovedRows=await pool.query('SELECT client_id,removed_at FROM removed_students');
-    const studentRemovedMap={};
-    studentRemovedRows.rows.forEach(function(r){studentRemovedMap[r.client_id]=r.removed_at;});
-    if(syncLocks.students){
-      console.log('Students sync already in progress - waiting...');
-      await waitForLock('students');
-      const justFinished=await getCache('students');
-      if(justFinished&&justFinished.length>0){
-        const removedStudents=await getStudentRemoved();
-        const out=justFinished.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id)});});
-        return res.json({students:out,syncedAt:new Date().toISOString(),fromCache:true});
-      }
+    if(syncLock.active){
+      console.log('Sync already in progress - waiting...');
+      await waitForFullSync();
+    } else {
+      await runFullSync();
     }
-    syncLocks.students=true;
-    const pracs=await allPages('/practitioners').catch(function(){return [];});
-    const pnames={};
-    pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
-    const patients=await allPages('/patients');
-    console.log(patients.length+' patients to check for students');
-    const MENTORING_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283]);
-    const INTERACTION_IDS=new Set([399651,399621,399669]);
-    const students=[];
-    for(var i=0;i<patients.length;i++){
-      const p=patients[i];
-      const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
-      var appts;
-      try{
-        appts=await allPages('/appointments',{patientId:p.id});
-      }catch(syncErr){
-        console.log('  student sync interrupted at '+(i+1)+'/'+patients.length+' - saving '+students.length+' found so far');
-        if(students.length>0)await setCache('students',students);
-        throw syncErr;
-      }
-      await wait(700);
-      if((i+1)%50===0){await setCache('students',students);console.log('  progress saved: '+students.length+' students so far');}
-      const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
-      if(!mentoringAppts.length)continue;
-      const studentRemovedAt=studentRemovedMap?studentRemovedMap[String(p.id)]:null;
-      if(studentRemovedAt){
-        const hasNewAppt=mentoringAppts.some(function(a){return new Date(a.start)>new Date(studentRemovedAt);});
-        if(hasNewAppt){
-          await pool.query('DELETE FROM removed_students WHERE client_id=$1',[String(p.id)]);
-        } else {
-          continue;
-        }
-      }
-      console.log('Student found: '+name);
-      const interactions=mentoringAppts
-        .filter(function(a){return INTERACTION_IDS.has(Number(a.serviceId));})
-        .sort(function(a,b){return new Date(b.start)-new Date(a.start);});
-      students.push({
-        id:String(p.id),
-        name:name,
-        practitioner:pnames[p.practitionerId]||'',
-        appointments:interactions.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===399669};}),
-        tasks:allTasks[String(p.id)]||[],
-        programs:programsFor(String(p.id)),
-        lastAction:allLastActions[String(p.id)]||null
-      });
-    }
-    await setCache('students',students);
-    console.log('DONE! '+students.length+' students');
-    syncLocks.students=false;
-    res.json({students:students,syncedAt:new Date().toISOString()});
-  }catch(err){syncLocks.students=false;console.error('Error:',err.message);res.status(500).json({error:err.message});}
+    const fresh=await getCache('students',true)||[];
+    res.json({students:await decorate(fresh),syncedAt:new Date().toISOString()});
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
 
 app.get('/api/onboarding',async function(req,res){
   if(!API_KEY)return res.status(500).json({error:'SPLOSE_API_KEY not set'});
+  const fullSync=req.query.full==='true';
   try{
     const allTasks=await getOnboardingTasks();
     const onboardingRemovedSet=await getOnboardingRemoved();
-    const cached=await getCache('onboarding');
-    if(cached){
-      const clients=cached.filter(function(c){return !onboardingRemovedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
-      return res.json({clients:clients,syncedAt:new Date().toISOString(),fromCache:true});
+    async function decorate(list){
+      return list.filter(function(c){return !onboardingRemovedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
     }
-    if(syncLocks.onboarding){
-      console.log('Onboarding sync already in progress - waiting...');
-      await waitForLock('onboarding');
-      const justFinished=await getCache('onboarding');
-      if(justFinished){
-        const out=justFinished.filter(function(c){return !onboardingRemovedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
-        return res.json({clients:out,syncedAt:new Date().toISOString(),fromCache:true});
+    if(!fullSync){
+      const cached=await getCache('onboarding');
+      if(cached){
+        return res.json({clients:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true});
       }
     }
-    syncLocks.onboarding=true;
-    const pracs=await allPages('/practitioners').catch(function(){return [];});
-    const pnames={};
-    pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
-    const patients=await allPages('/patients');
-    const DT=[{id:'ob1',assignee:'Annie',n:'Contact card sent to Felicity',done:false},{id:'ob2',assignee:'Annie',n:'Registration',done:false},{id:'ob3',assignee:'Annie',n:'Consent',done:false},{id:'ob4',assignee:'Annie',n:'Safety Checklist if Home',done:false},{id:'ob5',assignee:'Annie',n:'Address to consult if home',done:false},{id:'ob6',assignee:'Annie',n:'DOB and Medicare (if applicable) added',done:false},{id:'ob7',assignee:'Annie',n:'Joined Circle',done:false},{id:'ob8',assignee:'Annie',n:'Circle chat opened and welcome message sent',done:false}];
-    const clients=[];
-    for(var i=0;i<patients.length;i++){
-      const p=patients[i];
-      const name=((p.firstname||'')+ ' '+(p.lastname||'')).trim()||'Patient '+p.id;
-      var appts;
-      try{
-        appts=await allPages('/appointments',{patientId:p.id});
-      }catch(syncErr){
-        console.log('  onboarding sync interrupted at '+(i+1)+'/'+patients.length+' - saving '+clients.length+' found so far');
-        if(clients.length>0)await setCache('onboarding',clients);
-        throw syncErr;
-      }
-      await wait(700);
-      if((i+1)%50===0){await setCache('onboarding',clients);console.log('  progress saved: '+clients.length+' so far');}
-      if(!appts.length)continue;
-      const sorted=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(a.start)-new Date(b.start);});
-      const firstAppt=sorted[0];
-      if(!firstAppt||firstAppt.start<'2026-06-04')continue;
-      if(onboardingRemovedSet.has(String(p.id)))continue;
-      const STUDENT_SERVICE_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283,444486]);
-      const isStudent=sorted.some(function(a){return STUDENT_SERVICE_IDS.has(Number(a.serviceId));});
-      if(isStudent)continue;
-      const existingTasks=allTasks[String(p.id)];
-      const tasks=existingTasks||DT.map(function(t){return Object.assign({},t,{id:t.id+'_'+p.id});});
-      clients.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',firstAppt:firstAppt.start.split('T')[0],tasks:tasks});
+    if(syncLock.active){
+      console.log('Sync already in progress - waiting...');
+      await waitForFullSync();
+    } else {
+      await runFullSync();
     }
-    await setCache('onboarding',clients);
-    console.log('DONE onboarding: '+clients.length+' clients');
-    syncLocks.onboarding=false;
-    res.json({clients:clients,syncedAt:new Date().toISOString()});
-  }catch(err){syncLocks.onboarding=false;console.error('Error:',err.message);res.status(500).json({error:err.message});}
+    const fresh=await getCache('onboarding',true)||[];
+    res.json({clients:await decorate(fresh),syncedAt:new Date().toISOString()});
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
 
