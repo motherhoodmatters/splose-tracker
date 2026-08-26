@@ -423,7 +423,9 @@ app.get('/api/students',async function(req,res){
     }
     async function decorate(list){
       const removedStudents=await getStudentRemoved();
-      return list.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null});});
+      const manual=await getCache('students_manual',true)||[];
+      const merged=list.concat(manual.filter(function(m){return !list.some(function(c){return c.id===m.id;});}));
+      return merged.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null});});
     }
     if(!fullSync){
       const cached=await getCache('students');
@@ -575,7 +577,9 @@ app.get('/api/student-onboarding',async function(req,res){
 app.get('/api/students-list',async function(req,res){
   try{
     const cached=await getCache('students')||[];
-    res.json({students:cached.map(function(s){return {id:s.id,name:s.name};})});
+    const manual=await getCache('students_manual',true)||[];
+    const merged=cached.concat(manual.filter(function(m){return !cached.some(function(c){return c.id===m.id;});}));
+    res.json({students:merged.map(function(s){return {id:s.id,name:s.name};})});
   }catch(err){res.status(500).json({error:err.message});}
 });
 
@@ -613,13 +617,16 @@ app.post('/api/student-onboarding/complete',async function(req,res){
     const cached=await getCache('student-onboarding',true)||[];
     const student=cached.find(function(c){return c.id===clientId;});
     await setCache('student-onboarding',cached.filter(function(c){return c.id!==clientId;}));
-    // Add to students list if not already there
+    // Add to students list if not already there - stored in students_manual, a
+    // separate cache key that a Splose full sync never overwrites (unlike the
+    // 'students' key, which is fully replaced with Splose data on every sync).
     if(student){
+      const manualCache=await getCache('students_manual',true)||[];
       const studentCache=await getCache('students')||[];
-      const exists=studentCache.find(function(c){return c.name===student.name;});
+      const exists=manualCache.find(function(c){return c.name===student.name;})||studentCache.find(function(c){return c.name===student.name;});
       if(!exists){
         const newStudent={id:clientId,name:student.name,practitioner:'',appointments:[],tasks:[],program:student.program};
-        await setCache('students',[...studentCache,newStudent]);
+        await setCache('students_manual',[...manualCache,newStudent]);
       }
     }
     res.json({ok:true});
