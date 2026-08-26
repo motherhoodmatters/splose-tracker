@@ -23,6 +23,7 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_tasks(client_id TEXT PRIMARY KEY,data TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS followup_overrides(client_id TEXT PRIMARY KEY,days INTEGER,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS last_actions(client_id TEXT PRIMARY KEY,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS student_phone(client_id TEXT PRIMARY KEY,phone TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   
   console.log('DB ready');
 }
@@ -118,12 +119,34 @@ async function setFollowupOverride(clientId,days){
     await pool.query('INSERT INTO followup_overrides(client_id,days,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET days=$2,updated_at=NOW()',[clientId,days]);
   }
 }
+async function getStudentPhones(){
+  const r=await pool.query('SELECT client_id,phone FROM student_phone');
+  const out={};
+  r.rows.forEach(function(row){out[row.client_id]=row.phone;});
+  return out;
+}
+async function setStudentPhone(clientId,phone){
+  if(phone===null||phone===undefined||phone===''){
+    await pool.query('DELETE FROM student_phone WHERE client_id=$1',[clientId]);
+  }else{
+    await pool.query('INSERT INTO student_phone(client_id,phone,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET phone=$2,updated_at=NOW()',[clientId,phone]);
+  }
+}
 
 app.post('/api/followup-override',async function(req,res){
   const{clientId,days}=req.body;
   if(!clientId)return res.status(400).json({error:'clientId required'});
   try{
     await setFollowupOverride(clientId,days===''||days===null||days===undefined?null:Number(days));
+    res.json({ok:true});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
+app.post('/api/student-phone',async function(req,res){
+  const{clientId,phone}=req.body;
+  if(!clientId)return res.status(400).json({error:'clientId required'});
+  try{
+    await setStudentPhone(clientId,phone);
     res.json({ok:true});
   }catch(err){res.status(500).json({error:err.message});}
 });
@@ -231,7 +254,8 @@ async function runFullSync(){
           const interactions=mentoringAppts.filter(function(a){return INTERACTION_IDS.has(Number(a.serviceId));}).sort(function(a,b){return new Date(b.start)-new Date(a.start);});
           const statusVal=allStatuses[String(p.id)];
           const programs=(statusVal&&statusVal.indexOf('programs_')===0)?statusVal.slice(9).split(',').filter(Boolean):[];
-          students.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',appointments:interactions.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===399669};}),tasks:allTasks[String(p.id)]||[],programs:programs,lastAction:allLastActions[String(p.id)]||null});
+          var studentMob=null;if(p.phoneNumbers&&p.phoneNumbers.length){var sMobEntry=p.phoneNumbers.find(function(ph){return ph.type==='Mobile'||ph.type==='mobile';});var sChosen=sMobEntry||p.phoneNumbers[0];if(sChosen)studentMob=(sChosen.code||'')+(sChosen.phoneNumber||'');}
+          students.push({id:String(p.id),name:name,practitioner:pnames[p.practitionerId]||'',mobile:studentMob,appointments:interactions.map(function(a){return {id:String(a.id),date:a.start.split('T')[0],serviceId:a.serviceId,isCheckin:Number(a.serviceId)===399669};}),tasks:allTasks[String(p.id)]||[],programs:programs,lastAction:allLastActions[String(p.id)]||null});
         }
       }
 
@@ -416,6 +440,7 @@ app.get('/api/students',async function(req,res){
     const allTasks=await getTasks();
     const allStatuses=await getStatuses();
     const allLastActions=await getLastActions();
+    const allPhones=await getStudentPhones();
     function programsFor(id){
       var s=allStatuses[id];
       if(s&&s.indexOf('programs_')===0)return s.slice(9).split(',').filter(Boolean);
@@ -425,7 +450,7 @@ app.get('/api/students',async function(req,res){
       const removedStudents=await getStudentRemoved();
       const manual=await getCache('students_manual',true)||[];
       const merged=list.concat(manual.filter(function(m){return !list.some(function(c){return c.id===m.id;});}));
-      return merged.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null});});
+      return merged.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null,mobile:allPhones[c.id]||c.mobile||null});});
     }
     if(!fullSync){
       const cached=await getCache('students');
