@@ -24,6 +24,8 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS followup_overrides(client_id TEXT PRIMARY KEY,days INTEGER,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS last_actions(client_id TEXT PRIMARY KEY,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS student_phone(client_id TEXT PRIMARY KEY,phone TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`ALTER TABLE removed ADD COLUMN IF NOT EXISTS known_appt_ids TEXT`);
+  await pool.query(`ALTER TABLE removed_students ADD COLUMN IF NOT EXISTS known_appt_ids TEXT`);
   
   console.log('DB ready');
 }
@@ -67,18 +69,22 @@ async function getTasks(){
 async function setTasks(clientId,tasks){
   await pool.query('INSERT INTO tasks(client_id,data,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(client_id) DO UPDATE SET data=$2,updated_at=NOW()',[clientId,JSON.stringify(tasks)]);
 }
+// Returns {clientId: {at, ids}} - ids is the snapshot of appointment ids that
+// existed at the moment the client was removed, used to tell "a genuinely new
+// booking was made since removal" apart from "an appointment that was already
+// on the books before removal" (see runFullSync's un-remove check).
 async function getRemoved(){
-  const r=await pool.query('SELECT client_id,removed_at FROM removed');
+  const r=await pool.query('SELECT client_id,removed_at,known_appt_ids FROM removed');
   const out={};
-  r.rows.forEach(function(row){out[row.client_id]=row.removed_at;});
+  r.rows.forEach(function(row){out[row.client_id]={at:row.removed_at,ids:row.known_appt_ids?JSON.parse(row.known_appt_ids):[]};});
   return out;
 }
 async function getStudentRemoved(){
   const r=await pool.query('SELECT client_id FROM removed_students');
   return new Set(r.rows.map(function(row){return row.client_id;}));
 }
-async function addStudentRemoved(clientId){
-  await pool.query('INSERT INTO removed_students(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
+async function addStudentRemoved(clientId,knownApptIds){
+  await pool.query('INSERT INTO removed_students(client_id,removed_at,known_appt_ids) VALUES($1,NOW(),$2) ON CONFLICT(client_id) DO UPDATE SET removed_at=NOW(),known_appt_ids=$2',[clientId,JSON.stringify(knownApptIds||[])]);
 }
 async function getOnboardingRemoved(){
   const r=await pool.query('SELECT client_id FROM removed_onboarding');
@@ -87,8 +93,11 @@ async function getOnboardingRemoved(){
 async function addOnboardingRemoved(clientId){
   await pool.query('INSERT INTO removed_onboarding(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
 }
-async function addRemoved(clientId){
-  await pool.query('INSERT INTO removed(client_id,updated_at) VALUES($1,NOW()) ON CONFLICT(client_id) DO NOTHING',[clientId]);
+// Re-removing (DO UPDATE, not DO NOTHING) resets the clock and re-snapshots
+// current appointments - important for "keeps coming back" cases: each time
+// Felicity removes someone again, we re-capture what's on the books right now.
+async function addRemoved(clientId,knownApptIds){
+  await pool.query('INSERT INTO removed(client_id,removed_at,updated_at,known_appt_ids) VALUES($1,NOW(),NOW(),$2) ON CONFLICT(client_id) DO UPDATE SET removed_at=NOW(),updated_at=NOW(),known_appt_ids=$2',[clientId,JSON.stringify(knownApptIds||[])]);
 }
 async function getOnboardingTasks(){
   const r=await pool.query('SELECT client_id,data FROM onboarding_tasks');
@@ -219,9 +228,9 @@ async function runFullSync(){
     const allTasks=await getTasks();
     const allStatuses=await getStatuses();
     const removedMap=await getRemoved();
-    const studentRemovedRows=await pool.query('SELECT client_id,removed_at FROM removed_students');
+    const studentRemovedRows=await pool.query('SELECT client_id,removed_at,known_appt_ids FROM removed_students');
     const studentRemovedMap={};
-    studentRemovedRows.rows.forEach(function(r){studentRemovedMap[r.client_id]=r.removed_at;});
+    studentRemovedRows.rows.forEach(function(r){studentRemovedMap[r.client_id]={at:r.removed_at,ids:r.known_appt_ids?JSON.parse(r.known_appt_ids):[]};});
     const allOverrides=await getFollowupOverrides();
     const onboardingRemovedSet=await getOnboardingRemoved();
     const allLastActions=await getLastActions();
@@ -232,6 +241,17 @@ async function runFullSync(){
     pracs.forEach(function(p){pnames[p.id]=((p.firstname||'')+' '+(p.lastname||'')).trim();});
     const patients=await allPages('/patients');
     console.log(patients.length+' patients');
+    // Defensive: if the same patient id ever comes back twice in one sync
+    // (a paging glitch), only process it once so nobody ends up double-listed.
+    const seenPatientIds=new Set();
+    var dedupedCount=0;
+    const dedupedPatientsList=patients.filter(function(p){
+      if(seenPatientIds.has(p.id))return false;
+      seenPatientIds.add(p.id);
+      return true;
+    });
+    dedupedCount=patients.length-dedupedPatientsList.length;
+    if(dedupedCount>0)console.log('  dropped '+dedupedCount+' duplicate patient id(s) from Splose response');
 
     const MENTORING_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283]);
     const INTERACTION_IDS=new Set([399651,399621,399669]);
@@ -239,14 +259,14 @@ async function runFullSync(){
 
     const clients=[],students=[],onboarding=[];
 
-    for(var i=0;i<patients.length;i++){
-      const p=patients[i];
+    for(var i=0;i<dedupedPatientsList.length;i++){
+      const p=dedupedPatientsList[i];
       const name=((p.firstname||'')+' '+(p.lastname||'')).trim()||'Patient '+p.id;
       var appts;
       try{
         appts=await allPages('/appointments',{patientId:p.id});
       }catch(syncErr){
-        console.log('  sync interrupted at patient '+(i+1)+'/'+patients.length+' - staging partial results ('+clients.length+' clients, '+students.length+' students, '+onboarding.length+' onboarding)');
+        console.log('  sync interrupted at patient '+(i+1)+'/'+dedupedPatientsList.length+' - staging partial results ('+clients.length+' clients, '+students.length+' students, '+onboarding.length+' onboarding)');
         await setCache('clients_staging',clients);
         await setCache('students_staging',students);
         await setCache('onboarding_staging',onboarding);
@@ -257,10 +277,15 @@ async function runFullSync(){
       // ---- Students ----
       const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
       if(mentoringAppts.length){
-        const studentRemovedAt=studentRemovedMap[String(p.id)];
+        const studentRemoval=studentRemovedMap[String(p.id)];
         var includeStudent=true;
-        if(studentRemovedAt){
-          const hasNewApptS=mentoringAppts.some(function(a){return new Date(a.start)>new Date(studentRemovedAt);});
+        if(studentRemoval){
+          // Un-remove only if a genuinely new appointment has been booked since
+          // removal (an id we hadn't seen before) - comparing appointment START
+          // DATE to removal time was wrong, since any already-scheduled future
+          // appointment would always look "new" and undo the removal straight away.
+          const knownIdsS=new Set(studentRemoval.ids||[]);
+          const hasNewApptS=mentoringAppts.some(function(a){return !knownIdsS.has(String(a.id));});
           if(hasNewApptS){
             await pool.query('DELETE FROM removed_students WHERE client_id=$1',[String(p.id)]);
           } else {
@@ -295,10 +320,13 @@ async function runFullSync(){
       const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
       const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
       if(hasRecent&&hasNonStudentAppt&&!isOnboardingNow){
-        const removedAt=removedMap[String(p.id)];
+        const removal=removedMap[String(p.id)];
         var includeClient=true;
-        if(removedAt){
-          const hasNewAppt=realAppts.some(function(a){return new Date(a.start)>new Date(removedAt);});
+        if(removal){
+          // Same fix as students above: un-remove only on a genuinely new
+          // appointment id, not just any appointment dated after removal.
+          const knownIds=new Set(removal.ids||[]);
+          const hasNewAppt=realAppts.some(function(a){return !knownIds.has(String(a.id));});
           if(hasNewAppt){
             await pool.query('DELETE FROM removed WHERE client_id=$1',[String(p.id)]);
             delete removedMap[String(p.id)];
@@ -318,7 +346,7 @@ async function runFullSync(){
         await setCache('clients_staging',clients);
         await setCache('students_staging',students);
         await setCache('onboarding_staging',onboarding);
-        console.log('  progress checkpoint '+(i+1)+'/'+patients.length+' - '+clients.length+' clients, '+students.length+' students, '+onboarding.length+' onboarding so far (staged, not live yet)');
+        console.log('  progress checkpoint '+(i+1)+'/'+dedupedPatientsList.length+' - '+clients.length+' clients, '+students.length+' students, '+onboarding.length+' onboarding so far (staged, not live yet)');
       }
     }
 
@@ -381,16 +409,35 @@ app.post('/api/remove',async function(req,res){
   const list=req.body.list||'clients';
   if(clientId){
     if(list==='students'){
-      await addStudentRemoved(clientId);
       const cached=await getCache('students');
+      const existing=cached&&cached.find(function(c){return c.id===clientId;});
+      const knownIds=existing&&existing.appointments?existing.appointments.map(function(a){return a.id;}):[];
+      await addStudentRemoved(clientId,knownIds);
       if(cached)await setCache('students',cached.filter(function(c){return c.id!==clientId;}));
     } else if(list==='onboarding'){
       await addOnboardingRemoved(clientId);
       const cached=await getCache('onboarding');
-      if(cached)await setCache('onboarding',cached.filter(function(c){return c.id!==clientId;}));
+      var movedFrom=null;
+      if(cached){
+        movedFrom=cached.find(function(c){return c.id===clientId;})||null;
+        await setCache('onboarding',cached.filter(function(c){return c.id!==clientId;}));
+      }
+      // Marking onboarding complete used to only take effect in the Clients
+      // list at the next full sync (previously up to a day away). Add a stub
+      // entry to the clients cache right now so they show up immediately;
+      // a background sync fills in real appointment history/phone shortly after.
+      if(movedFrom){
+        const clientsCached=await getCache('clients',true)||[];
+        if(!clientsCached.some(function(c){return c.id===clientId;})){
+          await setCache('clients',[...clientsCached,{id:movedFrom.id,name:movedFrom.name,mobile:null,practitioner:movedFrom.practitioner,lastRealAppt:movedFrom.firstAppt||null,appointments:[],tasks:[],manualStatus:null,followupDays:null,lastAction:null}]);
+        }
+      }
+      triggerBackgroundSync();
     } else {
-      await addRemoved(clientId);
       const cached=await getCache('clients');
+      const existing=cached&&cached.find(function(c){return c.id===clientId;});
+      const knownIds=existing&&existing.appointments?existing.appointments.map(function(a){return a.id;}):[];
+      await addRemoved(clientId,knownIds);
       if(cached)await setCache('clients',cached.filter(function(c){return c.id!==clientId;}));
     }
   }

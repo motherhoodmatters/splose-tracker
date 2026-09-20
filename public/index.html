@@ -313,8 +313,15 @@ function doRemoveStudent(id){
 
 function doRemoveOnboarding(id){
   if(!confirm('Mark onboarding complete and remove from this list?'))return;
+  var movedFrom=G.onboarding.find(function(c){return c.id===id;});
   fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'onboarding'})});
   G.onboarding=G.onboarding.filter(function(c){return c.id!==id;});
+  // Show them in Active Clients straightaway rather than waiting for the next
+  // sync to notice - a background sync (kicked off server-side) fills in
+  // their real appointment history and phone number shortly after.
+  if(movedFrom&&!G.clients.some(function(c){return c.id===id;})){
+    G.clients=enrich(G.clients.concat([{id:movedFrom.id,name:movedFrom.name,mobile:null,practitioner:movedFrom.practitioner,lastRealAppt:movedFrom.firstAppt||null,appointments:[],tasks:[],manualStatus:null,followupDays:null,lastAction:null}]));
+  }
   G.onboardingView='list';render();
 }
 window._delOB=function(btn){var cid=btn.getAttribute('data-cid');var tid=btn.getAttribute('data-tid');doRemoveOnboardingTask(cid,tid);};
