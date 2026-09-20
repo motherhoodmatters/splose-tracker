@@ -37,6 +37,23 @@ async function getCache(key,noExpiry){
   }
   return JSON.parse(r.rows[0].value);
 }
+// Same lookup as getCache but never treats old data as absent - always returns
+// whatever is stored plus its age, so a caller can serve it immediately while
+// deciding separately whether to refresh in the background. Used for the
+// stale-while-revalidate routes below; does not change getCache's own behaviour.
+async function getCacheWithAge(key){
+  const r=await pool.query('SELECT value,updated_at FROM cache WHERE key=$1',[key]);
+  if(!r.rows.length)return {value:null,ageHours:Infinity};
+  const ageHours=(Date.now()-new Date(r.rows[0].updated_at).getTime())/1000/60/60;
+  return {value:JSON.parse(r.rows[0].value),ageHours:ageHours};
+}
+// Starts a full sync without making the caller wait for it, unless one is
+// already running. Errors are logged, not thrown, since nobody is awaiting this.
+function triggerBackgroundSync(){
+  if(syncLock.active)return;
+  console.log('Cache stale - triggering background sync');
+  runFullSync().catch(function(e){console.error('Background sync failed:',e.message);});
+}
 async function setCache(key,value){
   await pool.query('INSERT INTO cache(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2,updated_at=NOW()',[key,JSON.stringify(value)]);
 }
@@ -328,10 +345,12 @@ app.get('/api/clients',async function(req,res){
       return list.filter(function(c){return !removedMap[c.id]&&(!onboardingIdSet.has(c.id)||obRemovedSet.has(c.id));}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],manualStatus:allStatuses[c.id]||null,followupDays:allOverrides[c.id]||null,lastAction:allLastActions[c.id]||null,mobile:c.mobile||null});});
     }
     if(!fullSync){
-      const cached=await getCache('clients');
+      const {value:cached,ageHours}=await getCacheWithAge('clients');
       if(cached&&cached.length>0){
-        console.log('Serving '+cached.length+' clients from DB cache');
-        return res.json({clients:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true});
+        console.log('Serving '+cached.length+' clients from DB cache (age '+ageHours.toFixed(1)+'h)');
+        const stale=ageHours>6;
+        if(stale)triggerBackgroundSync();
+        return res.json({clients:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true,stale:stale,syncing:syncLock.active});
       }
     }
     if(syncLock.active){
@@ -453,10 +472,12 @@ app.get('/api/students',async function(req,res){
       return merged.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null,mobile:allPhones[c.id]||c.mobile||null});});
     }
     if(!fullSync){
-      const cached=await getCache('students');
+      const {value:cached,ageHours}=await getCacheWithAge('students');
       if(cached&&cached.length>0){
-        console.log('Serving '+cached.length+' students from cache');
-        return res.json({students:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true});
+        console.log('Serving '+cached.length+' students from cache (age '+ageHours.toFixed(1)+'h)');
+        const stale=ageHours>6;
+        if(stale)triggerBackgroundSync();
+        return res.json({students:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true,stale:stale,syncing:syncLock.active});
       }
     }
     if(syncLock.active){
@@ -481,9 +502,11 @@ app.get('/api/onboarding',async function(req,res){
       return list.filter(function(c){return !onboardingRemovedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
     }
     if(!fullSync){
-      const cached=await getCache('onboarding');
+      const {value:cached,ageHours}=await getCacheWithAge('onboarding');
       if(cached){
-        return res.json({clients:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true});
+        const stale=ageHours>6;
+        if(stale)triggerBackgroundSync();
+        return res.json({clients:await decorate(cached),syncedAt:new Date().toISOString(),fromCache:true,stale:stale,syncing:syncLock.active});
       }
     }
     if(syncLock.active){

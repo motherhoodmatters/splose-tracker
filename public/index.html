@@ -219,7 +219,16 @@ function doSync(){
     
     G.clients=enrich(d.clients||[]);
     G.syncedAt=d.syncedAt;
-    G.syncing=false;render();
+    G.syncing=false;
+    // If the server served us stale cache and kicked off a refresh in the
+    // background, show that and check back once so the list catches up
+    // without needing another manual click.
+    G.bgSyncing=!!d.syncing;
+    render();
+    if(d.syncing&&!G.bgSyncRecheckScheduled){
+      G.bgSyncRecheckScheduled=true;
+      setTimeout(function(){G.bgSyncRecheckScheduled=false;doSync();},45000);
+    }
   }).catch(function(e){G.error=e.message;G.syncing=false;render();});
 }
 
@@ -809,7 +818,7 @@ function renderList(){
   var list=getList();
   var sb='<button class="pri" id="sbtn" onclick="doSync()">'+(G.syncing?'Syncing...':'Sync from Splose')+'</button>';
   var out=tabs+'<div class="hdr"<div><h1>Follow-up tracker</h1><p class="sub">'+G.clients.length+' clients</p></div>';
-  out+='<div class="hdr-right">'+(G.syncedAt?'<div class="sync-info">Last synced<br>'+ago(G.syncedAt)+'</div>':'')+sb+'</div></div>';
+  out+='<div class="hdr-right">'+(G.syncedAt?'<div class="sync-info">Last synced<br>'+ago(G.syncedAt)+(G.bgSyncing?' <span style="color:#0d9488">(refreshing...)</span>':'')+'</div>':'')+sb+'</div></div>';
   if(G.error)out+='<div class="err">Error: '+esc(G.error)+'</div>';
   if(G.clients.length===0&&!G.error){out+='<div class="empty dashed"><p style="margin-bottom:14px">No data yet.</p>'+sb+'</div>';return out;}
   out+='<div class="stats">';
