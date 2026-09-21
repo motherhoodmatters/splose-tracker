@@ -26,6 +26,11 @@ async function initDB(){
   await pool.query(`CREATE TABLE IF NOT EXISTS student_phone(client_id TEXT PRIMARY KEY,phone TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`ALTER TABLE removed ADD COLUMN IF NOT EXISTS known_appt_ids TEXT`);
   await pool.query(`ALTER TABLE removed_students ADD COLUMN IF NOT EXISTS known_appt_ids TEXT`);
+  // Permanent exclusion, separate from `removed`: for patients who aren't
+  // Felicity's client at all (another practitioner's booking that surfaced
+  // in onboarding) rather than her own client going quiet. Never auto-reverses
+  // on a new appointment, unlike `removed` - that's the whole point.
+  await pool.query(`CREATE TABLE IF NOT EXISTS not_my_client(client_id TEXT PRIMARY KEY,added_at TIMESTAMPTZ DEFAULT NOW())`);
   
   console.log('DB ready');
 }
@@ -92,6 +97,13 @@ async function getOnboardingRemoved(){
 }
 async function addOnboardingRemoved(clientId){
   await pool.query('INSERT INTO removed_onboarding(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
+}
+async function getNotMyClient(){
+  const r=await pool.query('SELECT client_id FROM not_my_client');
+  return new Set(r.rows.map(function(row){return row.client_id;}));
+}
+async function addNotMyClient(clientId){
+  await pool.query('INSERT INTO not_my_client(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
 }
 // Re-removing (DO UPDATE, not DO NOTHING) resets the clock and re-snapshots
 // current appointments - important for "keeps coming back" cases: each time
@@ -233,6 +245,7 @@ async function runFullSync(){
     studentRemovedRows.rows.forEach(function(r){studentRemovedMap[r.client_id]={at:r.removed_at,ids:r.known_appt_ids?JSON.parse(r.known_appt_ids):[]};});
     const allOverrides=await getFollowupOverrides();
     const onboardingRemovedSet=await getOnboardingRemoved();
+    const notMyClientSet=await getNotMyClient();
     const allLastActions=await getLastActions();
     const onboardingTasksMap=await getOnboardingTasks();
 
@@ -276,7 +289,7 @@ async function runFullSync(){
 
       // ---- Students ----
       const mentoringAppts=appts.filter(function(a){return a.start&&MENTORING_IDS.has(Number(a.serviceId));});
-      if(mentoringAppts.length){
+      if(mentoringAppts.length&&!notMyClientSet.has(String(p.id))){
         const studentRemoval=studentRemovedMap[String(p.id)];
         var includeStudent=true;
         if(studentRemoval){
@@ -305,7 +318,7 @@ async function runFullSync(){
       const sortedAsc=appts.filter(function(a){return !!a.start;}).sort(function(a,b){return new Date(a.start)-new Date(b.start);});
       const firstAppt=sortedAsc[0];
       var isOnboardingNow=false;
-      if(firstAppt&&firstAppt.start>='2026-06-04'&&!onboardingRemovedSet.has(String(p.id))){
+      if(firstAppt&&firstAppt.start>='2026-06-04'&&!onboardingRemovedSet.has(String(p.id))&&!notMyClientSet.has(String(p.id))){
         const isStudentSvc=sortedAsc.some(function(a){return ONBOARDING_STUDENT_IDS.has(Number(a.serviceId));});
         if(!isStudentSvc){
           isOnboardingNow=true;
@@ -319,7 +332,7 @@ async function runFullSync(){
       const realAppts=appts.filter(function(a){return a.start&&Number(a.serviceId)!==CHECKIN_ID;});
       const hasRecent=realAppts.some(function(a){return a.start>='2026-04-01';});
       const hasNonStudentAppt=appts.some(function(a){return !STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;});
-      if(hasRecent&&hasNonStudentAppt&&!isOnboardingNow){
+      if(hasRecent&&hasNonStudentAppt&&!isOnboardingNow&&!notMyClientSet.has(String(p.id))){
         const removal=removedMap[String(p.id)];
         var includeClient=true;
         if(removal){
@@ -422,11 +435,19 @@ app.post('/api/remove',async function(req,res){
         movedFrom=cached.find(function(c){return c.id===clientId;})||null;
         await setCache('onboarding',cached.filter(function(c){return c.id!==clientId;}));
       }
-      // Marking onboarding complete used to only take effect in the Clients
-      // list at the next full sync (previously up to a day away). Add a stub
-      // entry to the clients cache right now so they show up immediately;
-      // a background sync fills in real appointment history/phone shortly after.
-      if(movedFrom){
+      if(req.body.notMyClient){
+        // Not Felicity's client at all (e.g. another practitioner's booking
+        // that surfaced in onboarding) - exclude permanently from Clients,
+        // Students and Onboarding, unlike the "onboarding complete" path
+        // below. This does NOT auto-reverse if they get a future appointment,
+        // since booking with another practitioner is expected and shouldn't
+        // bring them back into Felicity's lists.
+        await addNotMyClient(clientId);
+      } else if(movedFrom){
+        // Marking onboarding complete used to only take effect in the Clients
+        // list at the next full sync (previously up to a day away). Add a stub
+        // entry to the clients cache right now so they show up immediately;
+        // a background sync fills in real appointment history/phone shortly after.
         const clientsCached=await getCache('clients',true)||[];
         if(!clientsCached.some(function(c){return c.id===clientId;})){
           await setCache('clients',[...clientsCached,{id:movedFrom.id,name:movedFrom.name,mobile:null,practitioner:movedFrom.practitioner,lastRealAppt:movedFrom.firstAppt||null,appointments:[],tasks:[],manualStatus:null,followupDays:null,lastAction:null}]);

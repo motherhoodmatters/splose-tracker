@@ -324,6 +324,12 @@ function doRemoveOnboarding(id){
   }
   G.onboardingView='list';render();
 }
+function doRemoveOnboardingNotMine(id){
+  if(!confirm("Remove from onboarding - not your client? They won't be added to Active Clients and won't come back on future syncs."))return;
+  fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'onboarding',notMyClient:true})});
+  G.onboarding=G.onboarding.filter(function(c){return c.id!==id;});
+  G.onboardingView='list';render();
+}
 window._delOB=function(btn){var cid=btn.getAttribute('data-cid');var tid=btn.getAttribute('data-tid');doRemoveOnboardingTask(cid,tid);};
 window._delOB=function(btn){var cid=btn.getAttribute('data-cid');var tid=btn.getAttribute('data-tid');doRemoveOnboardingTask(cid,tid);};
 async function doRemoveOnboardingTask(cid,tid){
@@ -424,8 +430,10 @@ function renderOnboardingDetail(){
   var out=renderTabs();
   out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:10px">';
   out+='<button class="back" style="margin:0" onclick="G.onboardingView=\'list\';render()">Back to onboarding</button>';
+  out+='<div style="display:flex;gap:8px">';
+  out+='<button onclick="doRemoveOnboardingNotMine(\''+c.id+'\')" style="padding:9px 16px;border-radius:6px;border:1px solid #e2e8f0;background:white;color:#64748b;font-size:14px;cursor:pointer;font-family:inherit;">Remove</button>';
   out+='<button class="danger" onclick="doRemoveOnboarding(\''+c.id+'\')">Onboarding complete</button>';
-  out+='</div>';
+  out+='</div></div>';
   out+='<div class="det-box"><h2 style="font-size:18px;font-weight:600;margin-bottom:4px">'+esc(c.name)+'</h2>';
   out+='<div class="mini-grid">';
   out+='<div class="mini"><p>First appointment</p><p>'+fmtDate(c.firstAppt)+'</p></div>';
