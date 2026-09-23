@@ -8,7 +8,11 @@ const API_KEY=process.env.SPLOSE_API_KEY||'';
 const BASE='https://api.splose.com/v1';
 const HEADERS={'Authorization':'Bearer '+API_KEY,'User-Agent':'splose-tracker/1.0','Content-Type':'application/json'};
 const CHECKIN_ID=399669;
-const STUDENT_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283,425993,425994]);
+// 399652 = Oral Assessment Workshop, 444486 = Acceptance of Program - both
+// mentoring/onboarding-related, not real client services; added after they
+// were found wrongly anchoring students (Maria Millan, Gillian Candy) in the
+// Clients list.
+const STUDENT_IDS=new Set([399651,399621,415863,416098,416099,416100,416101,416173,425885,437283,425993,425994,399652,444486]);
 
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false},connectionTimeoutMillis:10000,idleTimeoutMillis:30000,max:3});
 
