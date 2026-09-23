@@ -424,6 +424,36 @@ app.get('/api/clients',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+// Read-only diagnostic: scans every list (Clients, Students, Onboarding,
+// Student Onboarding) for names that appear more than once, so duplicate
+// Splose profiles or duplicate manual entries can be spotted directly rather
+// than found by eye. Never writes anything.
+app.get('/api/debug/duplicate-names',async function(req,res){
+  try{
+    function findDupes(list){
+      const byName={};
+      (list||[]).forEach(function(c){
+        const key=(c.name||'').trim().toLowerCase();
+        if(!key)return;
+        if(!byName[key])byName[key]={name:c.name,entries:[]};
+        byName[key].entries.push({id:c.id,practitioner:c.practitioner||null,lastRealAppt:c.lastRealAppt||c.firstAppt||null});
+      });
+      return Object.keys(byName).map(function(k){return byName[k];}).filter(function(g){return g.entries.length>1;});
+    }
+    const clientsCached=await getCache('clients',true)||[];
+    const studentsCached=await getCache('students',true)||[];
+    const studentsManual=await getCache('students_manual',true)||[];
+    const onboardingCached=await getCache('onboarding',true)||[];
+    const studentOnboardingCached=await getCache('student-onboarding',true)||[];
+    res.json({
+      clients:findDupes(clientsCached),
+      students:findDupes(studentsCached.concat(studentsManual)),
+      onboarding:findDupes(onboardingCached),
+      studentOnboarding:findDupes(studentOnboardingCached)
+    });
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+});
+
 // Tries a few plausible endpoint names for Splose's service/appointment-type
 // list, since the exact path isn't documented anywhere in this codebase.
 // Returns whichever one actually responds with data, so the debug endpoint
