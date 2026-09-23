@@ -80,6 +80,33 @@ async function knownApptIdsFor(clientId,cachedEntry){
     return cachedEntry&&cachedEntry.appointments?cachedEntry.appointments.map(function(a){return a.id;}):[];
   }
 }
+// Mirrors the frontend's addBiz/bizLeft/autoSt (public/index.html) exactly,
+// so the server can tell who's showing as "Discharge" without needing the
+// browser - used only by the read-only preview and bulk-cleanup endpoints
+// below, never by the ordinary sync.
+function addBizDays(startDate,n){
+  var d=new Date(startDate+'T00:00:00');var c=0;
+  while(c<n){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)c++;}
+  return d.toISOString().split('T')[0];
+}
+function bizDaysLeft(endDate){
+  if(!endDate)return 10;
+  var now=new Date();now.setHours(0,0,0,0);
+  var end=new Date(endDate+'T00:00:00');
+  if(now>end)return -1;
+  var n=0,d=new Date(now);
+  while(d<end){d.setDate(d.getDate()+1);if(d.getDay()%6!==0)n++;}
+  return n;
+}
+function autoStatus(c){
+  if(!c.lastRealAppt)return 'rebook';
+  var days=c.followupDays||10;
+  var end=addBizDays(c.lastRealAppt,days);
+  var left=bizDaysLeft(end);
+  if(left<0)return 'discharge';
+  if(left<=3)return 'checkin';
+  return 'active';
+}
 async function setCache(key,value){
   await pool.query('INSERT INTO cache(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2,updated_at=NOW()',[key,JSON.stringify(value)]);
 }
@@ -433,6 +460,55 @@ app.get('/api/debug/removed-ids',async function(req,res){
     const removedClients=await pool.query('SELECT client_id,removed_at FROM removed ORDER BY removed_at DESC');
     const removedStudents=await pool.query('SELECT client_id,removed_at FROM removed_students ORDER BY removed_at DESC');
     res.json({removedClients:removedClients.rows,removedStudents:removedStudents.rows});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
+// Read-only preview for the Discharge bulk cleanup below - shows exactly who
+// would be removed and why, without changing anything. Always call this
+// first and check the list (especially the excluded names) before calling
+// the POST endpoint that actually removes them.
+app.get('/api/debug/discharge-preview',async function(req,res){
+  try{
+    const clientsCached=await getCache('clients',true)||[];
+    const allStatuses=await getStatuses();
+    const exclude=(req.query.exclude||'Bec Taylor').split(',').map(function(n){return n.trim().toLowerCase();});
+    const discharged=clientsCached.filter(function(c){
+      const st=allStatuses[c.id]||autoStatus(c);
+      return st==='discharge';
+    });
+    const toRemove=discharged.filter(function(c){return exclude.indexOf((c.name||'').trim().toLowerCase())===-1;});
+    const excluded=discharged.filter(function(c){return exclude.indexOf((c.name||'').trim().toLowerCase())>-1;});
+    res.json({totalDischarged:discharged.length,willRemove:toRemove.length,toRemove:toRemove.map(function(c){return {id:c.id,name:c.name,lastRealAppt:c.lastRealAppt};}),excluded:excluded.map(function(c){return {id:c.id,name:c.name};})});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+// Bulk-removes everyone currently showing as Discharge, except names in
+// ?exclude= (comma-separated, defaults to "Bec Taylor"). Uses the same live
+// appointment snapshot as a normal single removal, so this should stick the
+// same way individual removals now do. Always check /api/debug/discharge-preview
+// first - this endpoint changes data. GET (not POST) so it can be triggered
+// by opening a link on a phone, matching /api/clearremoved and /api/unremove
+// elsewhere in this file.
+app.get('/api/bulk-remove-discharged',async function(req,res){
+  try{
+    const exclude=(req.query.exclude||'Bec Taylor').split(',').map(function(n){return n.trim().toLowerCase();});
+    const clientsCached=await getCache('clients',true)||[];
+    const allStatuses=await getStatuses();
+    const discharged=clientsCached.filter(function(c){
+      const st=allStatuses[c.id]||autoStatus(c);
+      return st==='discharge';
+    });
+    const toRemove=discharged.filter(function(c){return exclude.indexOf((c.name||'').trim().toLowerCase())===-1;});
+    const removedNames=[];
+    var current=clientsCached;
+    for(var i=0;i<toRemove.length;i++){
+      const c=toRemove[i];
+      const knownIds=await knownApptIdsFor(c.id,c);
+      await addRemoved(c.id,knownIds);
+      current=current.filter(function(x){return x.id!==c.id;});
+      removedNames.push(c.name);
+    }
+    await setCache('clients',current);
+    res.json({removed:removedNames.length,names:removedNames});
   }catch(err){res.status(500).json({error:err.message});}
 });
 
