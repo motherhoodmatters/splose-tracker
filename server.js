@@ -420,6 +420,30 @@ app.get('/api/clients',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+// Read-only diagnostic: for anyone currently sitting in both Clients and
+// Students, shows exactly which appointment(s) are causing the "non-student"
+// classification, so a miscategorised service (e.g. a mentoring phone call
+// booked under the wrong service id) can be spotted directly. Never writes
+// anything.
+app.get('/api/debug/dual-listed',async function(req,res){
+  try{
+    const clientsCached=await getCache('clients',true)||[];
+    const studentsCached=await getCache('students',true)||[];
+    const studentIds=new Set(studentsCached.map(function(s){return s.id;}));
+    const dual=clientsCached.filter(function(c){return studentIds.has(c.id);});
+    const out=[];
+    for(var i=0;i<dual.length;i++){
+      const c=dual[i];
+      var flaggedAppts=[];
+      try{
+        const live=await allPages('/appointments',{patientId:c.id});
+        flaggedAppts=live.filter(function(a){return a.start&&!STUDENT_IDS.has(Number(a.serviceId))&&Number(a.serviceId)!==CHECKIN_ID;}).map(function(a){return {serviceId:a.serviceId,date:a.start.split('T')[0]};});
+      }catch(e){flaggedAppts=[{error:e.message}];}
+      out.push({id:c.id,name:c.name,flaggedAppointments:flaggedAppts});
+    }
+    res.json({count:out.length,dual:out});
+  }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
+});
 app.get('/api/clearremoved',async function(req,res){
   await pool.query('DELETE FROM removed');
   await setCache('clients',null);
