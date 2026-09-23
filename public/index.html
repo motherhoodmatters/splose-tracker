@@ -194,6 +194,14 @@ function doCompleteStudentOnboarding(id){
       G.soView='list';render();
     });
 }
+function doRemoveStudentOnboardingEntry(id){
+  if(!confirm('Remove this entry from Student Onboarding? This will NOT add them to the Students list - use this for duplicates or mistakes.'))return;
+  fetch('/api/student-onboarding/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id})})
+    .then(function(){
+      G.studentOnboarding=G.studentOnboarding.filter(function(c){return c.id!==id;});
+      G.soView='list';render();
+    });
+}
 function doOnboardingSync(){
   G.onboardingSyncing=true;render();
   fetch('/api/onboarding').then(function(r){return r.json();}).then(function(d){
@@ -552,8 +560,10 @@ function renderSODetail(){
   var out=renderTabs();
   out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap;gap:10px">';
   out+='<button class="back" style="margin:0" onclick="G.soView=\'list\';render()">Back to student onboarding</button>';
+  out+='<div style="display:flex;gap:8px">';
+  out+='<button onclick="doRemoveStudentOnboardingEntry(\''+c.id+'\')" style="padding:9px 16px;border-radius:6px;border:1px solid #e2e8f0;background:white;color:#64748b;font-size:14px;cursor:pointer;font-family:inherit;">Remove</button>';
   out+='<button class="danger" onclick="doRemoveStudentOnboarding(\''+c.id+'\')">Onboarding complete</button>';
-  out+='</div>';
+  out+='</div></div>';
   out+='<div class="det-box"><h2 style="font-size:18px;font-weight:600;margin-bottom:8px">'+esc(c.name)+'</h2>';
   out+='<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
   var soProgs=c.programs?c.programs:(c.program?[c.program]:[]);

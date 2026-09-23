@@ -859,6 +859,24 @@ app.post('/api/student-onboarding/complete',async function(req,res){
   }catch(err){res.status(500).json({error:err.message});}
 });
 
+// Deletes a Student Onboarding entry outright - for duplicates, mistakes, or
+// anyone who was never a real student - without the "complete" side effect
+// of also pushing them into the Students list. Previously the only way to
+// remove an entry here was to mark it complete (which always added a
+// students_manual placeholder) and then separately remove them from
+// Students - two steps, and it recreated the exact duplicate problem this
+// was meant to solve.
+app.post('/api/student-onboarding/remove',async function(req,res){
+  const{clientId}=req.body;
+  if(!clientId)return res.status(400).json({error:'clientId required'});
+  try{
+    await addOnboardingRemoved(clientId);
+    const cached=await getCache('student-onboarding',true)||[];
+    await setCache('student-onboarding',cached.filter(function(c){return c.id!==clientId;}));
+    res.json({ok:true});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
 
 app.post('/api/student-onboarding/program',async function(req,res){
   const{clientId,program}=req.body;
