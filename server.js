@@ -424,6 +424,18 @@ app.get('/api/clients',async function(req,res){
   }catch(err){console.error('Error:',err.message);res.status(500).json({error:err.message});}
 });
 
+// Read-only diagnostic: shows exactly which ids are currently in the removed
+// tables, so a removal can be checked against the duplicate-names list to
+// see whether the real Splose-synced id or the manual placeholder id was
+// the one actually removed.
+app.get('/api/debug/removed-ids',async function(req,res){
+  try{
+    const removedClients=await pool.query('SELECT client_id,removed_at FROM removed ORDER BY removed_at DESC');
+    const removedStudents=await pool.query('SELECT client_id,removed_at FROM removed_students ORDER BY removed_at DESC');
+    res.json({removedClients:removedClients.rows,removedStudents:removedStudents.rows});
+  }catch(err){res.status(500).json({error:err.message});}
+});
+
 // Read-only diagnostic: scans every list (Clients, Students, Onboarding,
 // Student Onboarding) for names that appear more than once, so duplicate
 // Splose profiles or duplicate manual entries can be spotted directly rather
@@ -628,7 +640,13 @@ app.get('/api/students',async function(req,res){
     async function decorate(list){
       const removedStudents=await getStudentRemoved();
       const manual=await getCache('students_manual',true)||[];
-      const merged=list.concat(manual.filter(function(m){return !list.some(function(c){return c.id===m.id;});}));
+      // Matching by id alone let a manual placeholder (created when someone
+      // was marked complete in Student Onboarding, before Splose had picked
+      // them up yet) sit forever alongside their real synced record once
+      // Splose did pick them up - same person, two different ids, so the
+      // id check never caught it. Matching by name too retires the
+      // placeholder the moment the real record exists.
+      const merged=list.concat(manual.filter(function(m){return !list.some(function(c){return c.id===m.id||(c.name||'').trim().toLowerCase()===(m.name||'').trim().toLowerCase();});}));
       return merged.filter(function(c){return !removedStudents.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[],programs:programsFor(c.id),lastAction:allLastActions[c.id]||null,mobile:allPhones[c.id]||c.mobile||null});});
     }
     if(!fullSync){
@@ -786,7 +804,7 @@ app.get('/api/students-list',async function(req,res){
   try{
     const cached=await getCache('students')||[];
     const manual=await getCache('students_manual',true)||[];
-    const merged=cached.concat(manual.filter(function(m){return !cached.some(function(c){return c.id===m.id;});}));
+    const merged=cached.concat(manual.filter(function(m){return !cached.some(function(c){return c.id===m.id||(c.name||'').trim().toLowerCase()===(m.name||'').trim().toLowerCase();});}));
     res.json({students:merged.map(function(s){return {id:s.id,name:s.name};})});
   }catch(err){res.status(500).json({error:err.message});}
 });
