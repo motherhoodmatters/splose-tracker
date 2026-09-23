@@ -61,6 +61,21 @@ function triggerBackgroundSync(){
   console.log('Cache stale - triggering background sync');
   runFullSync().catch(function(e){console.error('Background sync failed:',e.message);});
 }
+// Always fetches live rather than trusting the cache, since a client who just
+// graduated from onboarding gets an empty placeholder appointment history
+// until the next background sync fills it in - snapshotting that emptiness
+// at removal time makes every real appointment look "new" afterwards and
+// silently undoes the removal. Falls back to the cache only if Splose can't
+// be reached, so Remove still works even if this lookup fails.
+async function knownApptIdsFor(clientId,cachedEntry){
+  try{
+    const live=await allPages('/appointments',{patientId:clientId});
+    return live.filter(function(a){return a.start;}).map(function(a){return String(a.id);});
+  }catch(e){
+    console.error('Live appointment fetch failed for removal snapshot, falling back to cache:',e.message);
+    return cachedEntry&&cachedEntry.appointments?cachedEntry.appointments.map(function(a){return a.id;}):[];
+  }
+}
 async function setCache(key,value){
   await pool.query('INSERT INTO cache(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2,updated_at=NOW()',[key,JSON.stringify(value)]);
 }
@@ -424,7 +439,7 @@ app.post('/api/remove',async function(req,res){
     if(list==='students'){
       const cached=await getCache('students');
       const existing=cached&&cached.find(function(c){return c.id===clientId;});
-      const knownIds=existing&&existing.appointments?existing.appointments.map(function(a){return a.id;}):[];
+      const knownIds=await knownApptIdsFor(clientId,existing);
       await addStudentRemoved(clientId,knownIds);
       if(cached)await setCache('students',cached.filter(function(c){return c.id!==clientId;}));
     } else if(list==='onboarding'){
@@ -457,7 +472,7 @@ app.post('/api/remove',async function(req,res){
     } else {
       const cached=await getCache('clients');
       const existing=cached&&cached.find(function(c){return c.id===clientId;});
-      const knownIds=existing&&existing.appointments?existing.appointments.map(function(a){return a.id;}):[];
+      const knownIds=await knownApptIdsFor(clientId,existing);
       await addRemoved(clientId,knownIds);
       if(cached)await setCache('clients',cached.filter(function(c){return c.id!==clientId;}));
     }
