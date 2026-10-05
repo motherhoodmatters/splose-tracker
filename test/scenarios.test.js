@@ -272,3 +272,24 @@ test('22. "Why isn\'t she showing?" - the diagnostic explains a missing person',
   assert.equal(why.snapshots[0].inOnboarding,false);
   assert.ok(why.snapshots[0].reasons.join(' ').length>0);
 });
+
+test('23. A person wrongly marked "not my client" can be restored on purpose, and only that person',async function(){
+  const env=await makeEnv();
+  env.splose.add(2,'Nalini','Test',[appt(201,'2026-10-01',SVC.initialConsult),appt(202,'2026-10-07',SVC.followUp)]);
+  env.splose.add(9,'Truly','Other',[appt(901,'2026-10-01',SVC.initialConsult)]);
+  await env.tracker.runCycle('t');
+  await env.api('POST','/api/remove',{clientId:'2',list:'onboarding',notMyClient:true});
+  await env.api('POST','/api/remove',{clientId:'9',list:'onboarding',notMyClient:true});
+  assert.equal((await env.api('GET','/api/onboarding')).clients.length,0);
+  const list=await env.api('GET','/api/debug/not-my-client');
+  assert.equal(list.count,2);
+  assert.ok(list.excluded.some(function(e){return e.name==='Nalini Test';}));
+  const r=await env.api('GET','/api/not-my-client/restore/2');
+  assert.equal(r.ok,true);assert.equal(r.restored,'Nalini Test');
+  assert.deepEqual(names((await env.api('GET','/api/onboarding')).clients),['Nalini Test']);
+  assert.equal((await env.api('GET','/api/debug/not-my-client')).count,1,'the other exclusion is untouched');
+  env.advance(3*3600*1000);await env.tracker.runCycle('t');
+  assert.deepEqual(names((await env.api('GET','/api/onboarding')).clients),['Nalini Test'],'stays after a sync');
+  const bad=await env.api('GET','/api/not-my-client/restore/999');
+  assert.equal(bad.ok,false);
+});

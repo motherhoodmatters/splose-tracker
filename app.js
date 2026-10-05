@@ -460,6 +460,37 @@ function createApp(deps){
     }catch(err){res.status(500).json({error:err.message});}
   });
 
+  // Read-only: everyone currently permanently excluded as "not my client",
+  // with names, so a mistaken click can be spotted.
+  app.get('/api/debug/not-my-client',async function(req,res){
+    try{
+      const ex=await pool.query('SELECT client_id,added_at FROM not_my_client ORDER BY added_at DESC');
+      const snaps=await loadSnapshots();
+      const byId={};snaps.forEach(function(s){byId[s.id]=s;});
+      res.json({count:ex.rows.length,excluded:ex.rows.map(function(r){
+        const s=byId[r.client_id];
+        const appts=s?s.appointments.map(function(a){return D.dateOf(a.start);}).sort():[];
+        return {id:r.client_id,name:s?s.name:null,excludedAt:r.added_at,firstAppt:appts[0]||null,lastAppt:appts[appts.length-1]||null,
+          restoreLink:'/api/not-my-client/restore/'+r.client_id};
+      })});
+    }catch(err){res.status(500).json({error:err.message});}
+  });
+  // Deliberate undo for ONE person wrongly marked "not my client". Deletes
+  // exactly two rows for that id (their exclusion, and the onboarding-removal
+  // the same button created) and nothing else, so they return to Onboarding.
+  app.get('/api/not-my-client/restore/:clientId',async function(req,res){
+    try{
+      const id=String(req.params.clientId);
+      const ex=await pool.query('SELECT 1 FROM not_my_client WHERE client_id=$1',[id]);
+      if(!ex.rows.length)return res.status(404).json({ok:false,error:'That person is not on the excluded list. Nothing changed.'});
+      await pool.query('DELETE FROM not_my_client WHERE client_id=$1',[id]);
+      await pool.query('DELETE FROM removed_onboarding WHERE client_id=$1',[id]);
+      const snap=(await loadSnapshots()).find(function(s){return s.id===id;});
+      log('Restored from not-my-client:',id,snap?snap.name:'');
+      res.json({ok:true,restored:snap?snap.name:id,note:'Reload the tracker; they will appear in Onboarding or Clients according to their appointments.'});
+    }catch(err){res.status(500).json({error:err.message});}
+  });
+
   // ------------------------------------------------------------ write routes
   // None of these touch the lists or any cache - they write only to their own
   // table, so using the app can never change what the sync does.
