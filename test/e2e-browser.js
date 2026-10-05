@@ -1,0 +1,30 @@
+// End-to-end: real page in a real browser against the real app + fake Splose.
+const {chromium}=require('/opt/npm-tools/node_modules/playwright');
+const {makeEnv,SVC}=require('./harness');
+const appt=function(id,date,svc){return {id:id,start:date+'T09:00:00Z',serviceId:svc};};
+(async()=>{
+  const env=await makeEnv();
+  env.splose.add(1,'Old','Client',[appt(101,'2026-02-01',SVC.initialConsult),appt(102,'2026-09-25',SVC.followUp)]);
+  env.splose.add(2,'Nalini','Test',[appt(201,'2026-10-01',SVC.initialConsult)]);
+  env.splose.add(5,'Stu','Dent',[appt(501,'2026-08-10',SVC.mentoring)]);
+  await env.tracker.runCycle('test');
+  const port=env.pool&&env.tracker.app&&await new Promise(function(r){const s=env.tracker.app.listen(0,function(){r(s.address().port);});});
+  const browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const page=await browser.newPage({viewport:{width:1100,height:900}});
+  const errors=[];page.on('pageerror',function(e){errors.push(e.message);});page.on('console',function(m){if(m.type()==='error')errors.push(m.text());});
+  await page.goto('http://127.0.0.1:'+port+'/');
+  await page.waitForTimeout(1500);
+  const clientsText=await page.innerText('body');
+  console.log('CLIENTS TAB has Old Client:',clientsText.includes('Old Client'),'| has Nalini:',clientsText.includes('Nalini'),'| has Stu Dent:',clientsText.includes('Stu Dent'));
+  await page.screenshot({path:'/tmp/e2e-clients.png'});
+  await page.click('text=Onboarding');await page.waitForTimeout(1500);
+  const ob=await page.innerText('body');
+  console.log('ONBOARDING TAB has Nalini:',ob.includes('Nalini'),'| has Old Client:',ob.includes('Old Client'));
+  await page.screenshot({path:'/tmp/e2e-onboarding.png'});
+  await page.click('text=Students');await page.waitForTimeout(1500);
+  const st=await page.innerText('body');
+  console.log('STUDENTS TAB has Stu Dent:',st.includes('Stu Dent'),'| has Nalini:',st.includes('Nalini'));
+  await page.screenshot({path:'/tmp/e2e-students.png'});
+  console.log('PAGE ERRORS:',JSON.stringify(errors));
+  await browser.close();process.exit(0);
+})().catch(function(e){console.error('E2E FAIL',e);process.exit(1);});

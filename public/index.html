@@ -202,31 +202,34 @@ function doRemoveStudentOnboardingEntry(id){
       G.soView='list';render();
     });
 }
-function doOnboardingSync(){
+function doOnboardingSync(manual){
   G.onboardingSyncing=true;render();
-  fetch('/api/onboarding').then(function(r){return r.json();}).then(function(d){
+  fetch('/api/onboarding'+(manual?'?refresh=1':'')).then(function(r){return r.json();}).then(function(d){
     if(d.error)throw new Error(d.error);
     G.onboarding=d.clients||[];
     G.onboardingSyncedAt=d.syncedAt;
     G.onboardingSyncing=false;render();
+    if(d.syncing&&!G.obRecheck){G.obRecheck=true;setTimeout(function(){G.obRecheck=false;doOnboardingSync();},20000);}
   }).catch(function(e){G.onboardingSyncing=false;render();});
 }
-function doStudentSync(){
+function doStudentSync(manual){
   G.studentSyncing=true;render();
-  fetch('/api/students').then(function(r){return r.json();}).then(function(d){
+  fetch('/api/students'+(manual?'?refresh=1':'')).then(function(r){return r.json();}).then(function(d){
     if(d.error)throw new Error(d.error);
     G.students=d.students||[];
     G.studentSyncedAt=d.syncedAt;
     G.studentSyncing=false;render();
+    if(d.syncing&&!G.stRecheck){G.stRecheck=true;setTimeout(function(){G.stRecheck=false;doStudentSync();},20000);}
   }).catch(function(e){G.studentSyncing=false;render();});
 }
-function doSync(){
+function doSync(auto){
   G.syncing=true;G.error=null;render();
-  fetch('/api/clients').then(function(r){return r.json();}).then(function(d){
+  fetch('/api/clients'+(auto===true?'':'?refresh=1')).then(function(r){return r.json();}).then(function(d){
     if(d.error)throw new Error(d.error);
     
     G.clients=enrich(d.clients||[]);
     G.syncedAt=d.syncedAt;
+    G.health=d.health||null;
     G.syncing=false;
     // If the server served us stale cache and kicked off a refresh in the
     // background, show that and check back once so the list catches up
@@ -235,7 +238,7 @@ function doSync(){
     render();
     if(d.syncing&&!G.bgSyncRecheckScheduled){
       G.bgSyncRecheckScheduled=true;
-      setTimeout(function(){G.bgSyncRecheckScheduled=false;doSync();},45000);
+      setTimeout(function(){G.bgSyncRecheckScheduled=false;doSync(true);},45000);
     }
   }).catch(function(e){G.error=e.message;G.syncing=false;render();});
 }
@@ -400,7 +403,7 @@ function renderObAddModal(){
     +'</div></div></div>';
 }
 function renderOnboardingList(){
-  var sb='<button class="pri" onclick="doOnboardingSync()" '+(G.onboardingSyncing?'disabled':'')+'>'+(G.onboardingSyncing?'Syncing...':'Sync Onboarding')+'</button>';
+  var sb='<button class="pri" onclick="doOnboardingSync(true)" '+(G.onboardingSyncing?'disabled':'')+'>'+(G.onboardingSyncing?'Syncing...':'Sync Onboarding')+'</button>';
   var out=renderTabs()+renderObAddModal();
   out+='<div class="hdr"><div><h1>Onboarding</h1><p class="sub">'+G.onboarding.length+' new clients</p></div><div class="hdr-right">'+(G.onboardingSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.onboardingSyncedAt)+'</div>':'')+sb+'<button class="pri" onclick="doAddOnboardingManual()" style="margin-left:8px;">+ Add manually</button></div></div>';
   if(!G.onboarding.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No new clients to onboard.</p>'+sb+'</div>';return out;}
@@ -743,7 +746,7 @@ function renderTabs(){
 }
 
 function renderStudentList(){
-  var sb='<button class="pri" onclick="doStudentSync()" '+(G.studentSyncing?'disabled':'')+'>'+(G.studentSyncing?'Syncing...':'Sync Students')+'</button>';
+  var sb='<button class="pri" onclick="doStudentSync(true)" '+(G.studentSyncing?'disabled':'')+'>'+(G.studentSyncing?'Syncing...':'Sync Students')+'</button>';
   var out=renderTabs();
   out+='<div class="hdr"><div><h1>Students</h1><p class="sub">'+G.students.length+' students</p></div><div class="hdr-right">'+(G.studentSyncedAt?'<div class="sync-info">Last synced<br>'+ago(G.studentSyncedAt)+'</div>':'')+sb+'</div></div>';
   if(!G.students.length){out+='<div class="empty dashed"><p style="margin-bottom:14px">No students yet.</p>'+sb+'</div>';return out;}
@@ -845,6 +848,7 @@ function renderList(){
   var out=tabs+'<div class="hdr"<div><h1>Follow-up tracker</h1><p class="sub">'+G.clients.length+' clients</p></div>';
   out+='<div class="hdr-right">'+(G.syncedAt?'<div class="sync-info">Last synced<br>'+ago(G.syncedAt)+(G.bgSyncing?' <span style="color:#0d9488">(refreshing...)</span>':'')+'</div>':'')+sb+'</div></div>';
   if(G.error)out+='<div class="err">Error: '+esc(G.error)+'</div>';
+  if(G.health&&G.health.lastError&&!G.health.syncing&&(!G.health.lastOkAt||Date.now()-new Date(G.health.lastOkAt).getTime()>2*3600*1000))out+='<div class="err">Splose sync is having trouble ('+esc(G.health.lastError)+'). Nothing is lost and it keeps retrying. Last good sync: '+(G.health.lastOkAt?ago(G.health.lastOkAt):'none yet')+'.</div>';
   if(G.clients.length===0&&!G.error){out+='<div class="empty dashed"><p style="margin-bottom:14px">No data yet.</p>'+sb+'</div>';return out;}
   out+='<div class="stats">';
   var sts=[{k:'checkin',l:'Check-in needed'},{k:'discharge',l:'Discharge'},{k:'rebook',l:'Rebook needed'},{k:'active',l:'Active'}];
@@ -995,7 +999,7 @@ function render(){
 }
 
 loadLocal();
-doSync();
+doSync(true);
 </script>
 </body>
 </html>
