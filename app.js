@@ -51,6 +51,8 @@ function createApp(deps){
     await q(`CREATE TABLE IF NOT EXISTS patient_snapshots(client_id TEXT PRIMARY KEY,name TEXT,practitioner TEXT,mobile TEXT,appointments TEXT,appts_synced_at TIMESTAMPTZ,meta_updated_at TIMESTAMPTZ DEFAULT NOW())`);
     // NEW: things entered by hand (list = 'onboarding' or 'clients'). The sync never touches this table.
     await q(`CREATE TABLE IF NOT EXISTS manual_entries(list TEXT,client_id TEXT,data TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),PRIMARY KEY(list,client_id))`);
+    // NEW: new students whose Student Onboarding has been completed (or who were removed from it on purpose).
+    await q(`CREATE TABLE IF NOT EXISTS student_onboarding_done(client_id TEXT PRIMARY KEY,done_at TIMESTAMPTZ DEFAULT NOW())`);
     // NEW: sync bookkeeping (last success, last error) so the app can report its own health honestly.
     await q(`CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY,value TEXT,updated_at TIMESTAMPTZ DEFAULT NOW())`);
     await migrateLegacyManual();
@@ -206,8 +208,8 @@ function createApp(deps){
 
   // Everything the rules need, loaded fresh. Never cached, never written.
   async function loadContext(){
-    const results=await Promise.all([loadSnapshots(),getRemoved(),getStudentRemovedMap(),getOnboardingRemoved(),getNotMyClient(),getTasks(),getStatuses(),getFollowupOverrides(),getLastActions(),getStudentPhones(),getOnboardingTasks(),getManual('onboarding'),getManual('clients'),getCache('clients'),getCache('students'),getCache('onboarding')]);
-    return {snapshots:results[0],removedClients:results[1],removedStudents:results[2],onboardingRemoved:results[3],notMyClient:results[4],tasks:results[5],statuses:results[6],overrides:results[7],lastActions:results[8],phones:results[9],onboardingTasks:results[10],manual:{onboarding:results[11],clients:results[12]},legacy:{clients:results[13]||[],students:results[14]||[],onboarding:results[15]||[]}};
+    const results=await Promise.all([loadSnapshots(),getRemoved(),getStudentRemovedMap(),getOnboardingRemoved(),getNotMyClient(),getTasks(),getStatuses(),getFollowupOverrides(),getLastActions(),getStudentPhones(),getOnboardingTasks(),getManual('onboarding'),getManual('clients'),getCache('clients'),getCache('students'),getCache('onboarding'),getIdSet('student_onboarding_done'),getCache('students_manual'),getCache('student-onboarding')]);
+    return {snapshots:results[0],removedClients:results[1],removedStudents:results[2],onboardingRemoved:results[3],notMyClient:results[4],tasks:results[5],statuses:results[6],overrides:results[7],lastActions:results[8],phones:results[9],onboardingTasks:results[10],manual:{onboarding:results[11],clients:results[12]},legacy:{clients:results[13]||[],students:results[14]||[],onboarding:results[15]||[]},studentOnboardingDone:results[16],studentManualNames:new Set((results[17]||[]).map(function(m){return D.normName(m.name);})),studentOnboardingManual:results[18]||[]};
   }
   async function lists(){return D.deriveAll(await loadContext());}
 
@@ -356,7 +358,7 @@ function createApp(deps){
   }
   // A page load may start a cycle in the background, never waits for it.
   async function nudge(){
-    if(syncLock.active||!API_KEY)return;
+    if(cfg.nudgeEnabled===false||syncLock.active||!API_KEY)return;
     try{
       const s=await getState('last_started');
       if(!s||now()-new Date(s.at).getTime()>cfg.nudgeMinGapMs)runCycle('page load').catch(function(e){log('Background sync failed:',e.message);});
@@ -428,7 +430,7 @@ function createApp(deps){
       res.json({
         snapshots:hits.map(function(s){
           const c=D.classify(s,ctx);
-          return {id:s.id,name:s.name,practitioner:s.practitioner,appointmentsFetched:!!s.apptsSyncedAt,appointments:(s.appointments||[]).map(function(a){return {date:D.dateOf(a.start),serviceId:a.serviceId};}),inClients:c.client,inStudents:c.student,inOnboarding:c.onboarding,reasons:c.reasons};
+          return {id:s.id,name:s.name,practitioner:s.practitioner,appointmentsFetched:!!s.apptsSyncedAt,appointments:(s.appointments||[]).map(function(a){return {date:D.dateOf(a.start),serviceId:a.serviceId};}),inClients:c.client,inStudents:c.student,inStudentOnboarding:c.studentOnboarding,inOnboarding:c.onboarding,reasons:c.reasons};
         }),
         manualEntries:manual.map(function(m){return {id:m.id,name:m.name,inOnboardingList:lst.onboarding.some(function(o){return o.id===m.id;}),inClientsList:lst.clients.some(function(o){return o.id===m.id;})};}),
         foundInSplosePatientList:hits.length>0
@@ -581,11 +583,9 @@ function createApp(deps){
   // ------------------------------------------- student onboarding (hand-entered)
   app.get('/api/student-onboarding',async function(req,res){
     try{
-      const allTasks=await getOnboardingTasks();
-      const removedSet=await getOnboardingRemoved();
-      const cached=(await getCache('student-onboarding'))||[];
-      const out=cached.filter(function(c){return !removedSet.has(c.id);}).map(function(c){return Object.assign({},c,{tasks:allTasks[c.id]||c.tasks||[]});});
-      res.json({clients:out,syncedAt:new Date().toISOString()});
+      nudge();
+      const l=await lists();
+      res.json({clients:l.studentOnboarding,syncedAt:await syncedAt()});
     }catch(err){res.status(500).json({error:err.message});}
   });
   app.get('/api/students-list',async function(req,res){
@@ -609,28 +609,43 @@ function createApp(deps){
       res.json({ok:true,student:newStudent});
     }catch(err){res.status(500).json({error:err.message});}
   });
+  const isSploseId=async function(id){return (await pool.query('SELECT 1 FROM patient_snapshots WHERE client_id=$1',[String(id)])).rows.length>0;};
+  // Complete: the person leaves Student Onboarding and (being in Splose, or via
+  // a hand-entered stand-in until Splose has them) appears in Students.
   app.post('/api/student-onboarding/complete',async function(req,res){
     const{clientId}=req.body;
     if(!clientId)return res.status(400).json({error:'clientId required'});
     try{
+      const l=await lists();
+      const entry=l.studentOnboarding.find(function(c){return c.id===clientId;});
       await addOnboardingRemoved(clientId);
-      const cached=(await getCache('student-onboarding'))||[];
-      const student=cached.find(function(c){return c.id===clientId;});
-      await setCache('student-onboarding',cached.filter(function(c){return c.id!==clientId;}));
-      if(student){
+      await pool.query('INSERT INTO student_onboarding_done(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
+      // also retire any hand-entered twin with the same name
+      const manual=(await getCache('student-onboarding'))||[];
+      if(entry){
+        for(const m of manual){if(D.normName(m.name)===D.normName(entry.name)&&m.id!==clientId)await addOnboardingRemoved(m.id);}
+      }
+      await setCache('student-onboarding',manual.filter(function(c){return c.id!==clientId;}));
+      if(entry&&!(await isSploseId(clientId))){
         const manualCache=(await getCache('students_manual'))||[];
-        const l=await lists();
-        const exists=manualCache.find(function(c){return D.normName(c.name)===D.normName(student.name);})||l.students.find(function(c){return D.normName(c.name)===D.normName(student.name);});
-        if(!exists)await setCache('students_manual',[...manualCache,{id:clientId,name:student.name,practitioner:'',appointments:[],tasks:[],program:student.program}]);
+        const exists=manualCache.find(function(c){return D.normName(c.name)===D.normName(entry.name);})||l.students.find(function(c){return D.normName(c.name)===D.normName(entry.name);});
+        if(!exists)await setCache('students_manual',[...manualCache,{id:clientId,name:entry.name,practitioner:'',appointments:[],tasks:[],program:entry.program}]);
       }
       res.json({ok:true});
     }catch(err){res.status(500).json({error:err.message});}
   });
+  // Remove: for duplicates/mistakes. Does NOT push the person into Students.
   app.post('/api/student-onboarding/remove',async function(req,res){
     const{clientId}=req.body;
     if(!clientId)return res.status(400).json({error:'clientId required'});
     try{
       await addOnboardingRemoved(clientId);
+      if(await isSploseId(clientId)){
+        // Real Splose person: leave Student Onboarding AND stay out of Students
+        // until a genuinely new mentoring appointment is booked.
+        await pool.query('INSERT INTO student_onboarding_done(client_id) VALUES($1) ON CONFLICT DO NOTHING',[clientId]);
+        await addStudentRemoved(clientId,await knownApptIdsFor(clientId));
+      }
       const cached=(await getCache('student-onboarding'))||[];
       await setCache('student-onboarding',cached.filter(function(c){return c.id!==clientId;}));
       res.json({ok:true});
@@ -642,6 +657,12 @@ function createApp(deps){
     try{
       const cached=await getCache('student-onboarding');
       if(cached)await setCache('student-onboarding',cached.map(function(c){return c.id===clientId?Object.assign({},c,{program:program}):c;}));
+      // Real Splose people keep their programs the same way students do, so
+      // they carry straight over to the Students list on completion.
+      if(await isSploseId(clientId)){
+        const progs=String(program||'').split(',').filter(Boolean);
+        await setStatus(clientId,progs.length?'programs_'+progs.join(','):null);
+      }
       res.json({ok:true});
     }catch(err){res.status(500).json({error:err.message});}
   });

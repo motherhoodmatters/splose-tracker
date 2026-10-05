@@ -233,15 +233,18 @@ test('18. Upgrading: old cache still shows people until their appointments are f
 });
 
 test('19. Health is honest: reports the real last success, not "now"',async function(){
-  const env=await setupBasic();
+  const env=await makeEnv(); // page-load syncs are off by default in tests, so timing is deterministic
+  env.splose.add(1,'Old','Client',[appt(101,'2026-02-01',SVC.initialConsult),recent(102)]);
   let cl=await env.api('GET','/api/clients');
   assert.equal(cl.syncedAt,null,'never synced yet -> no fake timestamp');
   await env.tracker.runCycle('t');
+  const at=new Date(env.now()).toISOString();
   cl=await env.api('GET','/api/clients');
-  assert.equal(cl.syncedAt,new Date(env.now()).toISOString());
+  assert.equal(cl.syncedAt,at);
   env.advance(5*3600*1000);
   cl=await env.api('GET','/api/clients');
-  assert.notEqual(cl.syncedAt,new Date(env.now()).toISOString(),'five hours on it still says when the last sync really was');
+  assert.equal(cl.syncedAt,at,'five hours on it still says when the last sync really was');
+  assert.notEqual(cl.syncedAt,new Date(env.now()).toISOString());
 });
 
 test('20. Active clients are refreshed every cycle window, quiet ones on a rolling basis; new bookings appear',async function(){
@@ -292,4 +295,114 @@ test('23. A person wrongly marked "not my client" can be restored on purpose, an
   assert.deepEqual(names((await env.api('GET','/api/onboarding')).clients),['Nalini Test'],'stays after a sync');
   const bad=await env.api('GET','/api/not-my-client/restore/999');
   assert.equal(bad.ok,false);
+});
+
+// ---- Student Onboarding is automatic for new students ----
+test('24. Sophie: first mentoring session booked 14 Oct -> Student Onboarding, NOT Students, and stays so after the date passes',async function(){
+  const env=await makeEnv();
+  env.splose.add(30,'Sophie','Robertson',[appt(3001,'2026-10-14',SVC.mentoring)]);
+  env.splose.add(31,'Casey','Dykes',[appt(3101,'2026-10-20',SVC.mentoring2)]);
+  await env.tracker.runCycle('t');
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),[]);
+  let so=await env.api('GET','/api/student-onboarding');
+  assert.deepEqual(names(so.clients),['Casey Dykes','Sophie Robertson']);
+  assert.equal(so.clients[0].tasks.length,11);
+  assert.equal((await env.api('GET','/api/clients')).clients.length,0);
+  assert.equal((await env.api('GET','/api/onboarding')).clients.length,0);
+  // the booking date comes and goes without her ever being completed
+  env.advance(30*86400000);await env.tracker.runCycle('t');
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),[]);
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,2);
+});
+
+test('25. Existing students (started before the cut-off) are untouched',async function(){
+  const env=await makeEnv();
+  env.splose.add(5,'Stu','Dent',[appt(501,'2026-08-10',SVC.mentoring),appt(502,'2026-10-14',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),['Stu Dent']);
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,0);
+});
+
+test('26. Completing Student Onboarding moves her to Students (once), with her ticks and programs, and she stays after syncs',async function(){
+  const env=await makeEnv();
+  env.splose.add(30,'Sophie','Robertson',[appt(3001,'2026-10-14',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  let so=await env.api('GET','/api/student-onboarding');
+  const tasks=so.clients[0].tasks.map(function(t,i){return i===0?Object.assign({},t,{done:true}):t;});
+  await env.api('POST','/api/onboarding-action',{clientId:'30',tasks:tasks});
+  await env.api('POST','/api/student-onboarding/program',{clientId:'30',program:'LEP,Pathway 3'});
+  so=await env.api('GET','/api/student-onboarding');
+  assert.equal(so.clients[0].tasks[0].done,true);
+  assert.deepEqual(so.clients[0].programs,['LEP','Pathway 3']);
+  await env.api('POST','/api/student-onboarding/complete',{clientId:'30'});
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,0);
+  let st=await env.api('GET','/api/students');
+  assert.deepEqual(names(st.students),['Sophie Robertson']);
+  assert.deepEqual(st.students[0].programs,['LEP','Pathway 3']);
+  for(let i=0;i<3;i++){env.advance(3*3600*1000);await env.tracker.runCycle('t');}
+  st=await env.api('GET','/api/students');
+  assert.equal(st.students.filter(function(s){return s.name==='Sophie Robertson';}).length,1);
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,0);
+});
+
+test('27. Removing a new student from Student Onboarding (mistake) puts her in neither list, until a new mentoring booking',async function(){
+  const env=await makeEnv();
+  env.splose.add(30,'Sophie','Robertson',[appt(3001,'2026-10-14',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  await env.api('POST','/api/student-onboarding/remove',{clientId:'30'});
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,0);
+  assert.equal((await env.api('GET','/api/students')).students.length,0);
+  env.advance(3*3600*1000);await env.tracker.runCycle('t');
+  assert.equal((await env.api('GET','/api/students')).students.length,0);
+  env.splose.appts[30].push(appt(3002,'2026-10-28',SVC.mentoring));
+  env.advance(3*3600*1000);await env.tracker.runCycle('t');
+  assert.equal((await env.api('GET','/api/students')).students.length,1);
+});
+
+test('28. A hand-entered Student Onboarding entry and the real Splose record are ONE entry; ticks follow; no duplicate after completing',async function(){
+  const env=await makeEnv();
+  const a=await env.api('POST','/api/student-onboarding/add',{name:'Casey Dykes',program:'LEP'});
+  const t=a.student.tasks.map(function(x,i){return i<2?Object.assign({},x,{done:true}):x;});
+  await env.api('POST','/api/onboarding-action',{clientId:a.student.id,tasks:t});
+  env.splose.add(31,'Casey','Dykes',[appt(3101,'2026-10-20',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  let so=await env.api('GET','/api/student-onboarding');
+  assert.equal(so.clients.length,1);
+  assert.equal(so.clients[0].id,'31');
+  assert.equal(so.clients[0].tasks.filter(function(x){return x.done;}).length,2,'ticks carried over');
+  assert.deepEqual(so.clients[0].programs,['LEP']);
+  await env.api('POST','/api/student-onboarding/complete',{clientId:'31'});
+  const st=await env.api('GET','/api/students');
+  assert.equal(st.students.filter(function(s){return s.name==='Casey Dykes';}).length,1);
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,0);
+});
+
+test('29. Hand-entered student completed before Splose has them: no bounce back into Student Onboarding once Splose does',async function(){
+  const env=await makeEnv();
+  const a=await env.api('POST','/api/student-onboarding/add',{name:'Casey Dykes'});
+  await env.api('POST','/api/student-onboarding/complete',{clientId:a.student.id});
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),['Casey Dykes']);
+  env.splose.add(31,'Casey','Dykes',[appt(3101,'2026-10-20',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,0);
+  assert.equal((await env.api('GET','/api/students')).students.filter(function(s){return s.name==='Casey Dykes';}).length,1);
+});
+
+test('30. "Why" says why a student is where they are',async function(){
+  const env=await makeEnv();
+  env.splose.add(30,'Sophie','Robertson',[appt(3001,'2026-10-14',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  const why=await env.api('GET','/api/debug/why?name=sophie');
+  assert.equal(why.snapshots[0].inStudentOnboarding,true);
+  assert.equal(why.snapshots[0].inStudents,false);
+  assert.ok(why.snapshots[0].reasons.join(' ').includes('new student'));
+});
+
+test('31. Opening the app starts a background sync by itself when none has run, and never blocks the page',async function(){
+  const env=await makeEnv({config:{nudgeEnabled:true}});
+  env.splose.add(1,'Old','Client',[appt(101,'2026-02-01',SVC.initialConsult),recent(102)]);
+  const first=await env.api('GET','/api/clients');
+  assert.ok(Array.isArray(first.clients),'page answers immediately');
+  for(let i=0;i<200&&(env.tracker.syncLock.active||!(await env.api('GET','/api/health')).lastOkAt);i++)await new Promise(function(r){setTimeout(r,25);});
+  assert.equal((await env.api('GET','/api/clients')).clients.length,1);
 });

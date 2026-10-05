@@ -1,0 +1,24 @@
+const {chromium}=require('/opt/npm-tools/node_modules/playwright');
+const {makeEnv,SVC}=require('./harness');
+const appt=function(id,date,svc){return {id:id,start:date+'T09:00:00Z',serviceId:svc};};
+(async()=>{
+  const env=await makeEnv();
+  env.splose.add(30,'Sophie','Robertson',[appt(3001,'2026-10-14',SVC.mentoring)]);
+  env.splose.add(31,'Casey','Dykes',[appt(3101,'2026-10-20',SVC.mentoring2)]);
+  env.splose.add(5,'Stu','Dent',[appt(501,'2026-08-10',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  const port=await new Promise(function(r){const s=env.tracker.app.listen(0,function(){r(s.address().port);});});
+  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const page=await b.newPage({viewport:{width:1000,height:760}});
+  const errs=[];page.on('pageerror',function(e){errs.push(e.message);});
+  await page.goto('http://127.0.0.1:'+port+'/');await page.waitForTimeout(1200);
+  await page.click('button:has-text("Students")');await page.waitForTimeout(1200);
+  let t=await page.innerText('body');
+  console.log('STUDENTS tab: Stu Dent',t.includes('Stu Dent'),'| Sophie',t.includes('Sophie'),'| Casey',t.includes('Casey'));
+  await page.click('button:has-text("Student Onboarding")');await page.waitForTimeout(1200);
+  t=await page.innerText('body');
+  console.log('STUDENT ONBOARDING tab: Sophie',t.includes('Sophie Robertson'),'| Casey',t.includes('Casey Dykes'),'| Stu',t.includes('Stu Dent'));
+  await page.screenshot({path:'/tmp/e2e-student-onboarding.png'});
+  console.log('PAGE ERRORS:',JSON.stringify(errs));
+  await b.close();process.exit(0);
+})().catch(function(e){console.error('FAIL',e.message);process.exit(1);});

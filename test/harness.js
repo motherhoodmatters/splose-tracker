@@ -72,7 +72,7 @@ async function makeEnv(opts){
   }
   const splose=opts.splose||fakeSplose();
   let clock=opts.startTime||Date.parse('2026-10-05T04:00:00Z');
-  const tracker=createApp({pool:pool,fetch:splose.fetch,apiKey:'test',base:'https://api.splose.com/v1',sleep:async function(){},now:function(){return clock;},log:function(){},config:Object.assign({apptGapMs:0,pageGapMs:0,backoffMs:0},opts.config||{})});
+  const tracker=createApp({pool:pool,fetch:splose.fetch,apiKey:'test',base:'https://api.splose.com/v1',sleep:async function(){},now:function(){return clock;},log:function(){},config:Object.assign({apptGapMs:0,pageGapMs:0,backoffMs:0,nudgeEnabled:false},opts.config||{})});
   if(opts.db)await tracker.migrate();else await tracker.initDB();
   const server=await new Promise(function(r){const sv=tracker.app.listen(0,function(){r(sv);});});
   const port=server.address().port;
