@@ -406,3 +406,42 @@ test('31. Opening the app starts a background sync by itself when none has run, 
   for(let i=0;i<200&&(env.tracker.syncLock.active||!(await env.api('GET','/api/health')).lastOkAt);i++)await new Promise(function(r){setTimeout(r,25);});
   assert.equal((await env.api('GET','/api/clients')).clients.length,1);
 });
+
+test('32. Casey: first mentoring session 2 Oct (already happened) is held in Student Onboarding; the start date is settable, previewable and reversible',async function(){
+  const env=await makeEnv();
+  env.splose.add(31,'Casey','Dykes',[appt(3101,'2026-10-02',SVC.mentoring2)]);
+  env.splose.add(32,'Mid','Sept',[appt(3201,'2026-09-16',SVC.mentoring)]);
+  env.splose.add(5,'Stu','Dent',[appt(501,'2026-08-10',SVC.mentoring)]);
+  await env.tracker.runCycle('t');
+  assert.deepEqual(names((await env.api('GET','/api/student-onboarding')).clients),['Casey Dykes']);
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),['Mid Sept','Stu Dent']);
+  // preview an earlier date: changes nothing
+  const pv=await env.api('GET','/api/debug/new-students?since=2026-09-10');
+  assert.deepEqual(pv.wouldMoveToStudentOnboarding.map(function(x){return x.name;}).sort(),['Casey Dykes','Mid Sept']);
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),['Mid Sept','Stu Dent'],'preview changed nothing');
+  // set it, then set it back
+  const set=await env.api('GET','/api/settings/student-onboarding-start?date=2026-09-10');
+  assert.equal(set.ok,true);
+  assert.deepEqual(names((await env.api('GET','/api/student-onboarding')).clients),['Casey Dykes','Mid Sept']);
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),['Stu Dent']);
+  await env.api('GET','/api/settings/student-onboarding-start?date=2026-10-03');
+  assert.deepEqual(names((await env.api('GET','/api/students')).students),['Casey Dykes','Mid Sept','Stu Dent']);
+  assert.equal((await env.api('GET','/api/student-onboarding')).clients.length,0);
+  const bad=await env.api('GET','/api/settings/student-onboarding-start?date=tomorrow');
+  assert.ok(bad.error);
+  assert.equal((await env.api('GET','/api/settings/student-onboarding-start')).current,'2026-10-03','a bad value changed nothing');
+});
+
+test('33. Restoring someone straight to Clients (onboarding already done) puts them in Clients, not Onboarding',async function(){
+  const env=await makeEnv();
+  env.splose.add(40,'Amelia','Tawfik',[appt(4001,'2026-09-03',SVC.initialConsult),appt(4002,'2026-09-22',SVC.followUp)]);
+  await env.tracker.runCycle('t');
+  await env.api('POST','/api/remove',{clientId:'40',list:'onboarding',notMyClient:true});
+  assert.equal((await env.api('GET','/api/clients')).clients.length,0,'excluded everywhere');
+  const r=await env.api('GET','/api/not-my-client/restore/40?to=clients');
+  assert.equal(r.ok,true);
+  assert.deepEqual(names((await env.api('GET','/api/clients')).clients),['Amelia Tawfik']);
+  assert.equal((await env.api('GET','/api/onboarding')).clients.length,0);
+  const list=await env.api('GET','/api/debug/not-my-client');
+  assert.equal(list.count,0);
+});

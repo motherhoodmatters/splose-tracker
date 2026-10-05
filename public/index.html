@@ -336,7 +336,8 @@ function doRemoveOnboarding(id){
   G.onboardingView='list';render();
 }
 function doRemoveOnboardingNotMine(id){
-  if(!confirm("Remove from onboarding - not your client? They won't be added to Active Clients and won't come back on future syncs."))return;
+  var who=(G.onboarding.find(function(c){return c.id===id;})||{}).name||'this person';
+  if(!confirm('Mark '+who+' as NOT YOUR CLIENT?\n\nThis hides them from Clients, Students and Onboarding for good (for example, another practitioner\'s client).\n\nIf they ARE your client and you just want them off this list, press Cancel and use "Onboarding complete" instead.'))return;
   fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clientId:id,list:'onboarding',notMyClient:true})});
   G.onboarding=G.onboarding.filter(function(c){return c.id!==id;});
   G.onboardingView='list';render();

@@ -208,8 +208,8 @@ function createApp(deps){
 
   // Everything the rules need, loaded fresh. Never cached, never written.
   async function loadContext(){
-    const results=await Promise.all([loadSnapshots(),getRemoved(),getStudentRemovedMap(),getOnboardingRemoved(),getNotMyClient(),getTasks(),getStatuses(),getFollowupOverrides(),getLastActions(),getStudentPhones(),getOnboardingTasks(),getManual('onboarding'),getManual('clients'),getCache('clients'),getCache('students'),getCache('onboarding'),getIdSet('student_onboarding_done'),getCache('students_manual'),getCache('student-onboarding')]);
-    return {snapshots:results[0],removedClients:results[1],removedStudents:results[2],onboardingRemoved:results[3],notMyClient:results[4],tasks:results[5],statuses:results[6],overrides:results[7],lastActions:results[8],phones:results[9],onboardingTasks:results[10],manual:{onboarding:results[11],clients:results[12]},legacy:{clients:results[13]||[],students:results[14]||[],onboarding:results[15]||[]},studentOnboardingDone:results[16],studentManualNames:new Set((results[17]||[]).map(function(m){return D.normName(m.name);})),studentOnboardingManual:results[18]||[]};
+    const results=await Promise.all([loadSnapshots(),getRemoved(),getStudentRemovedMap(),getOnboardingRemoved(),getNotMyClient(),getTasks(),getStatuses(),getFollowupOverrides(),getLastActions(),getStudentPhones(),getOnboardingTasks(),getManual('onboarding'),getManual('clients'),getCache('clients'),getCache('students'),getCache('onboarding'),getIdSet('student_onboarding_done'),getCache('students_manual'),getCache('student-onboarding'),getState('student_onboarding_start')]);
+    return {snapshots:results[0],removedClients:results[1],removedStudents:results[2],onboardingRemoved:results[3],notMyClient:results[4],tasks:results[5],statuses:results[6],overrides:results[7],lastActions:results[8],phones:results[9],onboardingTasks:results[10],manual:{onboarding:results[11],clients:results[12]},legacy:{clients:results[13]||[],students:results[14]||[],onboarding:results[15]||[]},studentOnboardingDone:results[16],studentManualNames:new Set((results[17]||[]).map(function(m){return D.normName(m.name);})),studentOnboardingManual:results[18]||[],studentOnboardingStart:results[19]&&results[19].date?results[19].date:null};
   }
   async function lists(){return D.deriveAll(await loadContext());}
 
@@ -473,23 +473,67 @@ function createApp(deps){
         const s=byId[r.client_id];
         const appts=s?s.appointments.map(function(a){return D.dateOf(a.start);}).sort():[];
         return {id:r.client_id,name:s?s.name:null,excludedAt:r.added_at,firstAppt:appts[0]||null,lastAppt:appts[appts.length-1]||null,
-          restoreLink:'/api/not-my-client/restore/'+r.client_id};
+          restoreToOnboarding:'/api/not-my-client/restore/'+r.client_id,restoreToClients:'/api/not-my-client/restore/'+r.client_id+'?to=clients'};
       })});
     }catch(err){res.status(500).json({error:err.message});}
   });
-  // Deliberate undo for ONE person wrongly marked "not my client". Deletes
-  // exactly two rows for that id (their exclusion, and the onboarding-removal
-  // the same button created) and nothing else, so they return to Onboarding.
+  // Deliberate undo for ONE person wrongly marked "not my client".
+  //   (default)   puts them back in Onboarding (deletes their exclusion and the
+  //               onboarding-removal the same button created)
+  //   ?to=clients puts them straight in Clients, for people whose onboarding was
+  //               already finished (deletes ONLY their exclusion)
+  // Never touches anyone else.
   app.get('/api/not-my-client/restore/:clientId',async function(req,res){
     try{
       const id=String(req.params.clientId);
+      const toClients=req.query.to==='clients';
       const ex=await pool.query('SELECT 1 FROM not_my_client WHERE client_id=$1',[id]);
       if(!ex.rows.length)return res.status(404).json({ok:false,error:'That person is not on the excluded list. Nothing changed.'});
       await pool.query('DELETE FROM not_my_client WHERE client_id=$1',[id]);
-      await pool.query('DELETE FROM removed_onboarding WHERE client_id=$1',[id]);
+      if(!toClients)await pool.query('DELETE FROM removed_onboarding WHERE client_id=$1',[id]);
       const snap=(await loadSnapshots()).find(function(s){return s.id===id;});
-      log('Restored from not-my-client:',id,snap?snap.name:'');
-      res.json({ok:true,restored:snap?snap.name:id,note:'Reload the tracker; they will appear in Onboarding or Clients according to their appointments.'});
+      log('Restored from not-my-client:',id,snap?snap.name:'',toClients?'(to Clients)':'(to Onboarding)');
+      res.json({ok:true,restored:snap?snap.name:id,wentTo:toClients?'Clients (if they have a recent appointment)':'Onboarding',note:'Reload the tracker.'});
+    }catch(err){res.status(500).json({error:err.message});}
+  });
+
+  // Who counts as a NEW student: anyone whose first mentoring session is on or
+  // after this date waits in Student Onboarding until marked complete.
+  // Changing it moves people between Students and Student Onboarding and
+  // nothing else; changing it back moves them back. No data is deleted.
+  const validDate=function(d){return /^\d{4}-\d{2}-\d{2}$/.test(String(d||''))&&!isNaN(Date.parse(d));};
+  async function studentStartPreview(since){
+    const ctx=await loadContext();
+    ctx.studentOnboardingStart=since;
+    const out=[];
+    ctx.snapshots.forEach(function(s){
+      const c=D.classify(s,ctx);
+      if(c.student||c.studentOnboarding){
+        const m=(s.appointments||[]).filter(function(a){return a.start&&D.MENTORING_IDS.has(Number(a.serviceId));}).map(function(a){return D.dateOf(a.start);}).sort();
+        out.push({name:s.name,firstMentoringSession:m[0],wouldBe:c.studentOnboarding?'Student Onboarding':'Students'});
+      }
+    });
+    out.sort(function(a,b){return String(b.firstMentoringSession).localeCompare(String(a.firstMentoringSession));});
+    return out;
+  }
+  app.get('/api/debug/new-students',async function(req,res){
+    try{
+      const since=req.query.since;
+      if(!validDate(since))return res.status(400).json({error:'Use ?since=YYYY-MM-DD, e.g. ?since=2026-09-15'});
+      const all=await studentStartPreview(since);
+      res.json({since:since,note:'Nothing is changed by this page. "wouldBe" is where each person would sit if this start date were used. Newest first; older people are omitted below.',
+        wouldMoveToStudentOnboarding:all.filter(function(x){return x.wouldBe==='Student Onboarding';}),
+        mostRecentStartsThatStayInStudents:all.filter(function(x){return x.wouldBe==='Students';}).slice(0,15)});
+    }catch(err){res.status(500).json({error:err.message});}
+  });
+  app.get('/api/settings/student-onboarding-start',async function(req,res){
+    try{
+      const cur=await getState('student_onboarding_start');
+      if(req.query.date===undefined)return res.json({current:cur&&cur.date?cur.date:D.STUDENT_ONBOARDING_START,isDefault:!(cur&&cur.date)});
+      if(!validDate(req.query.date))return res.status(400).json({error:'Use ?date=YYYY-MM-DD, e.g. ?date=2026-09-15. Nothing changed.'});
+      await setState('student_onboarding_start',{date:req.query.date});
+      const l=await lists();
+      res.json({ok:true,current:req.query.date,inStudentOnboardingNow:l.studentOnboarding.map(function(x){return x.name;}).sort()});
     }catch(err){res.status(500).json({error:err.message});}
   });
 
